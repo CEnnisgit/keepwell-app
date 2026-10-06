@@ -45,7 +45,9 @@ struct DuplicatesView: View {
                               "dupItems": stats.items, "dupFeaturePrints": stats.featurePrints, "dupHashes": stats.hashes,
                               "dupComparisons": stats.comparisons, "dupPairs": stats.pairs,
                               "dupMinDistance": Double(stats.minDistance),
-                              "dupSmallest": stats.smallestDistances.map { String(format: "%.3f", $0) }.joined(separator: " ")])
+                              "dupSmallest": stats.smallestDistances.map { String(format: "%.3f", $0) }.joined(separator: " "),
+                              "dupSource": stats.source.rawValue,
+                              "dupProbeDistance": stats.probeDistance.map { Double($0) } ?? -1])
             #endif
         }
     }

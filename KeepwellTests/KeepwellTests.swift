@@ -152,6 +152,14 @@ final class KeepwellTests: XCTestCase {
         XCTAssertGreaterThan(DuplicateEngine.score(newer), DuplicateEngine.score(big))
     }
 
+    func testDistanceSourceTrustsVisionOnlyWhenItSeparatesDifferentPhotos() {
+        XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: false, probeDistance: nil), .hash)
+        XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: nil), .vision)
+        XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: 0), .hash,
+                       "clearly different photos at distance 0 means Vision output is degenerate")
+        XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: 0.62), .vision)
+    }
+
     func testDifferenceHashFallback() throws {
         func image(_ fill: (Int, Int) -> UInt8) throws -> CGImage {
             let w = 64, h = 64

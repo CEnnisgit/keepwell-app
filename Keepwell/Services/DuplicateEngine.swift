@@ -32,6 +32,10 @@ struct DuplicateScanStats: Sendable {
     var minDistance: Float = -1
     /// The eight smallest distances seen, for calibrating the slider mapping.
     var smallestDistances: [Float] = []
+    /// Which distance drove grouping: Vision feature prints, or the dHash fallback.
+    var source: DuplicateScanner.DistanceSource = .hash
+    /// Vision's distance between two clearly different photos (dHash at least 16 bits apart), if one was found.
+    var probeDistance: Float?
 }
 
 /// Receives the synchronous PHImageManager result without mutating a captured local.
@@ -46,6 +50,19 @@ enum DuplicateScanner {
     static let maxNeighbors = 40
     /// Pairs above this distance are discarded; the loosest slider setting stays below it.
     static let maxStoredDistance: Float = 0.9
+    /// dHash bits that make two photos "clearly different" for the Vision sanity probe.
+    static let probeMinHashBits = 16
+
+    enum DistanceSource: String, Sendable { case vision, hash }
+
+    /// Vision is trusted unless it rates two clearly different photos as identical, which some
+    /// Simulator runtimes do (every feature print distance comes back 0). Without any Vision print
+    /// the dHash fallback is used; without a clearly different pair there is nothing to doubt.
+    static func chooseSource(hasVisionPrints: Bool, probeDistance: Float?) -> DistanceSource {
+        guard hasVisionPrints else { return .hash }
+        guard let probeDistance else { return .vision }
+        return probeDistance < 0.001 ? .hash : .vision
+    }
 
     static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> ([SimilarPair], DuplicateScanStats) {
         let total = items.count
@@ -87,6 +104,24 @@ enum DuplicateScanner {
             if index % 10 == 0 || index == total - 1 { progress(index + 1, total) }
         }
 
+        // Sanity probe: Vision distance between the first two photos whose hashes are clearly apart.
+        var probe: Float?
+        // Bounded to the first 200 usable photos so a library of look-alikes cannot make this quadratic.
+        let indexed = Array((0..<total).filter { prints[$0] != nil && hashes[$0] != nil }.prefix(200))
+        probeSearch: for a in indexed {
+            for b in indexed where b > a {
+                if let ha = hashes[a], let hb = hashes[b], (ha ^ hb).nonzeroBitCount >= probeMinHashBits,
+                   let pa = prints[a], let pb = prints[b] {
+                    var d: Float = 0
+                    if (try? pa.computeDistance(&d, to: pb)) != nil { probe = d }
+                    break probeSearch
+                }
+            }
+        }
+        let source = chooseSource(hasVisionPrints: stats.featurePrints > 1, probeDistance: probe)
+        stats.source = source
+        stats.probeDistance = probe
+
         var pairs: [SimilarPair] = []
         var allDistances: [Float] = []
         for i in 0..<total {
@@ -97,7 +132,8 @@ enum DuplicateScanner {
                 guard let dj = items[j].date, dj.timeIntervalSince(di) <= bucketWindow else { break }
                 neighbors += 1
                 stats.comparisons += 1
-                if let d = distance(prints[i], prints[j], hashes[i], hashes[j]) {
+                if let d = distance(source == .vision ? prints[i] : nil, source == .vision ? prints[j] : nil,
+                                    hashes[i], hashes[j]) {
                     allDistances.append(d)
                     if stats.minDistance < 0 || d < stats.minDistance { stats.minDistance = d }
                     if d <= maxStoredDistance { pairs.append(SimilarPair(a: i, b: j, distance: d)) }
@@ -116,7 +152,7 @@ enum DuplicateScanner {
             var d: Float = 0
             if (try? p1.computeDistance(&d, to: p2)) != nil { return d }
         }
-        // Fallback when Vision is unavailable (e.g. some Simulator configurations): perceptual hash.
+        // Fallback when Vision is unavailable or untrustworthy (some Simulator runtimes): perceptual hash.
         if let h1, let h2 {
             return Float((h1 ^ h2).nonzeroBitCount) / 64.0 * 2.0
         }
