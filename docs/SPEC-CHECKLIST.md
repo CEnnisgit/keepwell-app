@@ -5,8 +5,11 @@ Status key: **Done** = implemented and shown by a Simulator screenshot or a pass
 of it is provable here. **Not verifiable in Simulator** = implemented, but the proof needs a device,
 an Apple account, or something the Simulator cannot do.
 
-Screenshots are `proof/screens/NN-<hook>.png` (1320x2868, iPhone 17 Pro Max). Tests are in
-`KeepwellTests/KeepwellTests.swift` and their result is in `proof/test.log`.
+Screenshots are `proof/screens/NN-<hook>.png` (1320x2868, iPhone 17 Pro Max). Each one is paired with
+`proof/state/NN-<hook>.json`, written by the DEBUG app (`Keepwell/App/DebugState.swift`) and checked by
+`scripts/sim/state-check.py`: the job fails unless Photos access is authorized, the library is non-empty and the
+hook reached its screen with content (months listed, On this day items, screenshots, duplicate groups, tray items,
+summary bytes, sheets shown). Tests are in `KeepwellTests/KeepwellTests.swift`; their result is in `proof/test.log`.
 
 | # | SPEC.md requirement | Status | Implementation (file:line) | Proof |
 |---|---|---|---|---|
@@ -27,7 +30,7 @@ Screenshots are `proof/screens/NN-<hook>.png` (1320x2868, iPhone 17 Pro Max). Te
 | 15 | No "speed up your phone" claims | Done | grep of `Keepwell/` for "speed", "faster" finds nothing | `10-paywall.png` copy |
 | 16 | Paywall shows the lifetime price | Done | `Keepwell/Views/PaywallView.swift:11` (lifetime second, visible without scrolling), `:167` ("one-time") | `10-paywall.png` ($24.99 one-time) |
 | 17 | Limited-library access supported (banner, Manage selection, suppressed auto prompt) | Partial | `Keepwell/Views/HomeView.swift:88-95`, `Keepwell/Services/PhotoLibrary.swift:185` (`presentLimitedLibraryPicker`), `project.yml:36` | Only full access is granted in the job (`simctl privacy grant photos`), so the banner and picker are not in any screenshot. Code path only. |
-| 18 | Denied access screen linking to iOS Settings | Not verifiable in Simulator | `Keepwell/Views/RootView.swift:68-85` | The job grants access before launch; a denied-state screenshot would need a second install/launch cycle without the grant. Not captured. |
+| 18 | Denied access screen linking to iOS Settings | Not verifiable in Simulator | `Keepwell/Views/RootView.swift:77-94` | The job grants access before launch; a denied-state screenshot would need a second install/launch cycle without the grant. Not captured. |
 | 19 | Free = unlimited swiping/keeping, 50 deletions per day; Pro = unlimited | Partial | `Keepwell/Services/CleanupStore.swift:10` (limit 50), `:99` (left today), `:130` (quota check), `Keepwell/Views/DeleteFlow.swift:25` (quota alert) | `01-home.png` ("50 of 50 free deletes left today"), `11-settings.png`; `testFreeDailyLimitIsFifty`. Hitting the cap needs 50 real deletes, not done here. |
 | 20 | Counter resets at local midnight (`Calendar.current.startOfDay`) | Done | `Keepwell/Services/CleanupStore.swift:94` (`startOfToday`), `:183-184` | `testStartOfTodayUsesLocalCalendarMidnight` |
 | 21 | Plans: monthly $3.99, yearly $14.99 (default, no trial), lifetime $24.99; no weekly | Done | `Keepwell.storekit:16,46,68`, `Keepwell/Services/StoreManager.swift:9-11`, `Keepwell/Views/PaywallView.swift:8` (yearly default) | `10-paywall.png` (yearly preselected, DEBUG stand-in prices that mirror the StoreKit file); `testProductIDsAndPlanOrder`, `testStoreKitConfigurationMatchesLockedPrices` |
@@ -36,7 +39,7 @@ Screenshots are `proof/screens/NN-<hook>.png` (1320x2868, iPhone 17 Pro Max). Te
 | 24 | Design tokens from design/TOKENS.md, dark teal for small link text | Done | `Keepwell/Resources/Assets.xcassets/*.colorset`, `Keepwell/App/Theme.swift:6` (`kwBrandTealText`), used in `PaywallView.swift:202`, `SettingsView.swift:76` | `10-paywall.png` (teal links under the plans), `01-home.png` |
 | 25 | Simulator only, no Apple account / TestFlight / spend | Done | Workflow builds with `CODE_SIGNING_ALLOWED=NO`; no signing files in the repo | `.github/workflows/sim-proof.yml`, `build.log` |
 | 26 | Pro described as ongoing value (monthly sessions, new duplicates as the library grows) | Done | `Keepwell/Views/PaywallView.swift:115-122` (benefit rows), `docs/REVIEW-NOTES-DRAFT.md` | `10-paywall.png` |
-| 27 | Raw Simulator captures of month swipe, How-similar slider and space-freed screens | Done | `scripts/sim/capture.sh`, hooks in `Keepwell/Views/HomeView.swift:189-215` | `02-swipe.png`, `03-month.png`, `06-duplicates.png`, `09-freed.png` |
+| 27 | Raw Simulator captures of month swipe, How-similar slider and space-freed screens | Done | `scripts/sim/capture.sh`, hooks in `Keepwell/Views/HomeView.swift:188-228` | `02-swipe.png`, `03-month.png`, `06-duplicates.png`, `09-freed.png` |
 | 28 | "Deleted photos go to Recently Deleted (30 days)" explainer before the first delete | Done | `Keepwell/Services/CleanupStore.swift:110`, `Keepwell/Views/DeleteFlow.swift:11,59` | `08-explainer.png`; `testExplainerShownBeforeFirstDeleteOnly` |
 | 29 | "See exactly what you freed" summary after each batch (thumbnails, count, bytes) | Done | `Keepwell/Services/CleanupStore.swift:193`, `Keepwell/Views/DeleteFlow.swift:94-107` | `09-freed.png` (rendered from the newest month's first 9 items without deleting) |
 | 30 | Settings screen with Keepwell Pro entry: status, upgrade, Restore Purchases, Manage Subscription | Done | `Keepwell/Views/SettingsView.swift:14-40`, `:80` (`manageSubscriptionsSheet`) | `11-settings.png` |

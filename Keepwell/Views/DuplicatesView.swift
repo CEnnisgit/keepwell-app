@@ -35,6 +35,10 @@ struct DuplicatesView: View {
         }
         .task(id: library.generation) {
             await engine.scanIfNeeded(library: library)
+            #if DEBUG
+            KWDebugState.set(["dupPhase": engine.phase == .ready ? "ready" : "scanning",
+                              "dupGroups": engine.groups.count, "dupMarked": engine.markedCount])
+            #endif
         }
     }
 

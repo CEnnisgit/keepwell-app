@@ -27,7 +27,16 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { library.refreshStatus() }
         }
-        .task { library.refreshStatus() }
+        .task {
+            library.refreshStatus()
+            #if DEBUG
+            KWDebugState.set(["screen": UserDefaults.standard.string(forKey: "KWScreen") ?? "",
+                              "status": "\(library.status.rawValue)", "ready": false])
+            #endif
+        }
+        #if DEBUG
+        .onChange(of: library.status) { _, status in KWDebugState.set(["status": "\(status.rawValue)"]) }
+        #endif
     }
 }
 

@@ -208,6 +208,22 @@ struct HomeView: View {
             await cleanup.debugShowSummary(for: Array((library.months.first?.assetIDs ?? []).prefix(9)))
         default: break
         }
+        KWDebugState.set([
+            "screen": screen,
+            "status": "\(library.status.rawValue)",
+            "assets": library.totalCount,
+            "months": library.months.count,
+            "newestMonthCount": library.months.first?.assetIDs.count ?? 0,
+            "onThisDay": library.onThisDay.count,
+            "screenshots": library.screenshots.count,
+            "pending": cleanup.pending.count,
+            "showPaywall": cleanup.showPaywall,
+            "showExplainer": cleanup.showExplainer,
+            "summaryCount": cleanup.summary?.count ?? 0,
+            "summaryBytes": Int(cleanup.summary?.bytes ?? 0),
+            "path": path.map { "\($0)" }.joined(separator: ">"),
+            "ready": true,
+        ])
         #endif
     }
 }
