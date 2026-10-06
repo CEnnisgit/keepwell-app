@@ -19,7 +19,19 @@ enum DuplicateScanPhase: Equatable, Sendable {
 
 enum DuplicateScanEvent: Sendable {
     case progress(Int, Int)
-    case finished([SimilarPair])
+    case finished([SimilarPair], DuplicateScanStats)
+}
+
+/// What a scan did, for diagnostics and the Simulator proof job.
+struct DuplicateScanStats: Sendable {
+    var items = 0
+    var featurePrints = 0
+    var hashes = 0
+    var comparisons = 0
+    var pairs = 0
+    var minDistance: Float = -1
+    /// The eight smallest distances seen, for calibrating the slider mapping.
+    var smallestDistances: [Float] = []
 }
 
 /// Receives the synchronous PHImageManager result without mutating a captured local.
@@ -35,9 +47,10 @@ enum DuplicateScanner {
     /// Pairs above this distance are discarded; the loosest slider setting stays below it.
     static let maxStoredDistance: Float = 0.9
 
-    static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> [SimilarPair] {
+    static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> ([SimilarPair], DuplicateScanStats) {
         let total = items.count
-        guard total > 1 else { return [] }
+        var stats = DuplicateScanStats(items: total)
+        guard total > 1 else { return ([], stats) }
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: items.map(\.id), options: nil)
         var assetByID: [String: PHAsset] = [:]
         for i in 0..<assets.count { let a = assets.object(at: i); assetByID[a.localIdentifier] = a }
@@ -61,18 +74,21 @@ enum DuplicateScanner {
                 }
                 guard let cgImage = box.cgImage else { return }
                 hashes[index] = differenceHash(cgImage)
+                if hashes[index] != nil { stats.hashes += 1 }
                 let request = VNGenerateImageFeaturePrintRequest()
                 request.revision = VNGenerateImageFeaturePrintRequestRevision2
                 request.imageCropAndScaleOption = .scaleFill
                 let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
                 if (try? handler.perform([request])) != nil {
                     prints[index] = request.results?.first
+                    if prints[index] != nil { stats.featurePrints += 1 }
                 }
             }
             if index % 10 == 0 || index == total - 1 { progress(index + 1, total) }
         }
 
         var pairs: [SimilarPair] = []
+        var allDistances: [Float] = []
         for i in 0..<total {
             guard let di = items[i].date else { continue }
             var j = i + 1
@@ -80,13 +96,18 @@ enum DuplicateScanner {
             while j < total, neighbors < maxNeighbors {
                 guard let dj = items[j].date, dj.timeIntervalSince(di) <= bucketWindow else { break }
                 neighbors += 1
-                if let d = distance(prints[i], prints[j], hashes[i], hashes[j]), d <= maxStoredDistance {
-                    pairs.append(SimilarPair(a: i, b: j, distance: d))
+                stats.comparisons += 1
+                if let d = distance(prints[i], prints[j], hashes[i], hashes[j]) {
+                    allDistances.append(d)
+                    if stats.minDistance < 0 || d < stats.minDistance { stats.minDistance = d }
+                    if d <= maxStoredDistance { pairs.append(SimilarPair(a: i, b: j, distance: d)) }
                 }
                 j += 1
             }
         }
-        return pairs
+        stats.pairs = pairs.count
+        stats.smallestDistances = Array(allDistances.sorted().prefix(8))
+        return (pairs, stats)
     }
 
     private static func distance(_ p1: VNFeaturePrintObservation?, _ p2: VNFeaturePrintObservation?,
@@ -134,6 +155,7 @@ final class DuplicateEngine {
 
     private(set) var phase: Phase = .idle
     private(set) var groups: [DuplicateGroup] = []
+    private(set) var lastStats = DuplicateScanStats()
     /// 0 = Exact, 1 = Loose. Regrouping uses cached pairwise distances, no rescan.
     var similarity: Double = 0.35 {
         didSet { if oldValue != similarity { regroup() } }
@@ -187,10 +209,10 @@ final class DuplicateEngine {
         phase = .scanning(done: 0, total: snapshot.count)
         let stream = AsyncStream<DuplicateScanEvent> { continuation in
             Task.detached(priority: .userInitiated) {
-                let result = DuplicateScanner.run(items: snapshot) { done, total in
+                let (result, stats) = DuplicateScanner.run(items: snapshot) { done, total in
                     continuation.yield(.progress(done, total))
                 }
-                continuation.yield(.finished(result))
+                continuation.yield(.finished(result, stats))
                 continuation.finish()
             }
         }
@@ -198,8 +220,9 @@ final class DuplicateEngine {
             switch event {
             case .progress(let done, let total):
                 phase = .scanning(done: done, total: total)
-            case .finished(let result):
+            case .finished(let result, let stats):
                 pairs = result
+                lastStats = stats
             }
         }
         scannedGeneration = generation

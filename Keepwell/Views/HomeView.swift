@@ -240,7 +240,7 @@ private struct MonthRow: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(month.title).font(.body.weight(.semibold)).foregroundStyle(Color.kwTextPrimary)
-                Text(reviewed == 0 ? "\(month.assetIDs.count) items"
+                Text(reviewed == 0 ? "\(month.assetIDs.count) \(month.assetIDs.count == 1 ? "item" : "items")"
                      : "\(reviewed) of \(month.assetIDs.count) reviewed")
                     .font(.footnote).foregroundStyle(Color.kwTextSecondary)
             }

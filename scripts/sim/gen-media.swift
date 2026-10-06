@@ -50,7 +50,7 @@ func drawScene(seed: Int, variant: Int, width: Int, height: Int) -> CGImage {
                         space: CGColorSpaceCreateDeviceRGB(),
                         bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
     let w = CGFloat(width), h = CGFloat(height)
-    let bright = 1.0 + Double(variant) * 0.03
+    let bright = 1.0 + Double(variant) * 0.012
     let hueA = rng.next(), hueB = rng.next()
     func sky(_ t: Double) -> CGColor {
         color(min(1, (0.35 + 0.6 * t) * bright), min(1, (0.45 + 0.4 * hueA) * bright), min(1, (0.75 + 0.25 * hueB) * bright))
@@ -63,7 +63,7 @@ func drawScene(seed: Int, variant: Int, width: Int, height: Int) -> CGImage {
     ctx.drawLinearGradient(gradient, start: start, end: end, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 
     // Sun
-    let sunX = w * (0.15 + 0.7 * rng.next()) + CGFloat(variant) * 6
+    let sunX = w * (0.15 + 0.7 * rng.next()) + CGFloat(variant) * 2
     let sunY = h * (0.6 + 0.3 * rng.next())
     let sunR = w * (0.05 + 0.06 * rng.next())
     ctx.setFillColor(color(min(1, 1.0 * bright), min(1, 0.85 * bright), 0.55))
@@ -73,7 +73,7 @@ func drawScene(seed: Int, variant: Int, width: Int, height: Int) -> CGImage {
     for layer in 0..<3 {
         let shade = 0.55 - Double(layer) * 0.15
         ctx.setFillColor(color(0.05 + shade * 0.3, shade * bright, 0.35 * shade + 0.1))
-        let hillY = h * (0.12 + 0.12 * Double(layer)) + CGFloat(variant) * 2
+        let hillY = h * (0.12 + 0.12 * Double(layer)) + CGFloat(variant)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: 0, y: 0))
         path.addLine(to: CGPoint(x: 0, y: hillY))
@@ -98,7 +98,7 @@ func drawScene(seed: Int, variant: Int, width: Int, height: Int) -> CGImage {
         ctx.fillEllipse(in: CGRect(x: tx - w * 0.03, y: h * 0.1 + th * 0.7, width: w * 0.072, height: th * 0.6))
     }
     // A little grain so JPEG sizes look like photos
-    var noise = LCG(state: UInt64(seed * 31 + variant))
+    var noise = LCG(state: UInt64(seed * 31))
     for _ in 0..<600 {
         let nx = w * noise.next(), ny = h * noise.next()
         ctx.setFillColor(color(1, 1, 1))
