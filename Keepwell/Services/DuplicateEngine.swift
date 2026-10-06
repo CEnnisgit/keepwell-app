@@ -166,6 +166,8 @@ final class DuplicateEngine {
     @ObservationIgnored private var items: [AssetInfo] = []
     @ObservationIgnored private var pairs: [SimilarPair] = []
     @ObservationIgnored private var scannedGeneration = -1
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanTaskGeneration = -1
 
     static func threshold(for similarity: Double) -> Float {
         // Exact ≈ 0.05, Loose ≈ 0.75 on Vision revision-2 feature print distance.
@@ -196,16 +198,24 @@ final class DuplicateEngine {
         group.assetIDs.filter { isMarked($0, in: group) }
     }
 
+    /// Whether the library generation still needs a scan (none done yet, or the library changed since).
+    func needsScan(generation: Int) -> Bool { scannedGeneration != generation }
+
+    /// Scans the library's current generation once and waits for it. The scan is owned by the engine,
+    /// not by the calling view task, so a cancelled view task never leaves a half-finished result behind.
     func scanIfNeeded(library: PhotoLibrary) async {
-        guard scannedGeneration != library.generation else { return }
-        if case .scanning = phase { return }
-        await scan(library: library)
+        let generation = library.generation
+        guard needsScan(generation: generation) else { return }
+        if scanTask == nil || scanTaskGeneration != generation {
+            scanTask?.cancel()
+            scanTaskGeneration = generation
+            let snapshot = library.imagesOldestFirst
+            scanTask = Task { [weak self] in await self?.scan(snapshot: snapshot, generation: generation) }
+        }
+        await scanTask?.value
     }
 
-    func scan(library: PhotoLibrary) async {
-        let snapshot = library.imagesOldestFirst
-        let generation = library.generation
-        items = snapshot
+    private func scan(snapshot: [AssetInfo], generation: Int) async {
         phase = .scanning(done: 0, total: snapshot.count)
         let stream = AsyncStream<DuplicateScanEvent> { continuation in
             Task.detached(priority: .userInitiated) {
@@ -216,16 +226,23 @@ final class DuplicateEngine {
                 continuation.finish()
             }
         }
+        var outcome: ([SimilarPair], DuplicateScanStats)?
         for await event in stream {
             switch event {
             case .progress(let done, let total):
-                phase = .scanning(done: done, total: total)
+                if scanTaskGeneration == generation { phase = .scanning(done: done, total: total) }
             case .finished(let result, let stats):
-                pairs = result
-                lastStats = stats
+                outcome = (result, stats)
             }
         }
+        // Superseded by a newer generation, or cancelled: keep the previous result untouched.
+        guard let outcome, scanTaskGeneration == generation, !Task.isCancelled else { return }
+        // Items and pairs are swapped together: pair indices always refer to the current items.
+        items = snapshot
+        pairs = outcome.0
+        lastStats = outcome.1
         scannedGeneration = generation
+        scanTask = nil
         overrides = [:]
         regroup()
         phase = .ready

@@ -142,13 +142,17 @@ final class PhotoLibrary {
         guard hasAccess else { return }
         isLoading = true
         let snap = await Task.detached(priority: .userInitiated) { LibrarySnapshot.load() }.value
+        // PhotoKit posts change notifications for metadata and analysis updates too. Only a real change
+        // in what Keepwell shows bumps the generation, so the duplicate scan is not restarted needlessly.
+        let changed = !hasLoaded || snap.byID != byID || snap.screenshots != screenshots || snap.onThisDay != onThisDay
+        isLoading = false
+        hasLoaded = true
+        guard changed else { return }
         months = snap.months
         byID = snap.byID
         imagesOldestFirst = snap.imagesOldestFirst
         onThisDay = snap.onThisDay
         screenshots = snap.screenshots
-        isLoading = false
-        hasLoaded = true
         generation += 1
     }
 

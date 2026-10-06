@@ -34,6 +34,9 @@ struct DuplicatesView: View {
             }
         }
         .task(id: library.generation) {
+            #if DEBUG
+            if engine.needsScan(generation: library.generation) { KWDebugState.set(["dupPhase": "scanning"]) }
+            #endif
             await engine.scanIfNeeded(library: library)
             #if DEBUG
             let stats = engine.lastStats
