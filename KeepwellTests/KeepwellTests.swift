@@ -157,6 +157,8 @@ final class KeepwellTests: XCTestCase {
         XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: nil), .vision)
         XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: 0), .hash,
                        "clearly different photos at distance 0 means Vision output is degenerate")
+        XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: 0.0018), .hash,
+                       "value observed on the iOS 26.5 Simulator for two unrelated photos")
         XCTAssertEqual(DuplicateScanner.chooseSource(hasVisionPrints: true, probeDistance: 0.62), .vision)
     }
 

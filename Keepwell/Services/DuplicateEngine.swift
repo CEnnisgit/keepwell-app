@@ -55,13 +55,18 @@ enum DuplicateScanner {
 
     enum DistanceSource: String, Sendable { case vision, hash }
 
-    /// Vision is trusted unless it rates two clearly different photos as identical, which some
-    /// Simulator runtimes do (every feature print distance comes back 0). Without any Vision print
-    /// the dHash fallback is used; without a clearly different pair there is nothing to doubt.
+    /// Below this, Vision is treated as unable to tell two clearly different photos apart. The slider's
+    /// tightest setting is 0.05, so a probe under it would put different scenes into one group.
+    /// Observed on the iOS 26.5 Simulator: 0.0018 for two unrelated generated photos.
+    static let degenerateProbeDistance: Float = 0.05
+
+    /// Vision is trusted unless it rates two clearly different photos as (nearly) identical, which some
+    /// Simulator runtimes do. Without any Vision print the dHash fallback is used; without a clearly
+    /// different pair there is nothing to doubt.
     static func chooseSource(hasVisionPrints: Bool, probeDistance: Float?) -> DistanceSource {
         guard hasVisionPrints else { return .hash }
         guard let probeDistance else { return .vision }
-        return probeDistance < 0.001 ? .hash : .vision
+        return probeDistance < degenerateProbeDistance ? .hash : .vision
     }
 
     static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> ([SimilarPair], DuplicateScanStats) {
