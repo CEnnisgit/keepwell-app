@@ -1,0 +1,239 @@
+import SwiftUI
+
+struct SwipeSessionView: View {
+    let session: ReviewSession
+    @Environment(PhotoLibrary.self) private var library
+    @Environment(CleanupStore.self) private var cleanup
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Decision { case keep, delete }
+    @State private var queue: [String] = []
+    @State private var index = 0
+    @State private var history: [(id: String, decision: Decision)] = []
+    @State private var drag: CGSize = .zero
+    @State private var flyOff: CGFloat = 0
+    @State private var prepared = false
+
+    private var current: String? { index < queue.count ? queue[index] : nil }
+    private var allIDs: [String] { library.ids(for: session) }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            header
+            ZStack {
+                if let current {
+                    if index + 1 < queue.count {
+                        card(for: queue[index + 1]).scaleEffect(0.95).opacity(0.6).allowsHitTesting(false)
+                    }
+                    card(for: current)
+                        .offset(x: drag.width + flyOff, y: drag.height * 0.2)
+                        .rotationEffect(.degrees(rotation))
+                        .gesture(dragGesture)
+                        .id(current)
+                        .transition(.opacity)
+                } else if prepared {
+                    doneView
+                }
+            }
+            .frame(maxHeight: .infinity)
+            controls
+        }
+        .padding(.horizontal, KWLayout.screenPadding)
+        .padding(.bottom, 12)
+        .background(Color.kwBackground.ignoresSafeArea())
+        .navigationTitle(library.title(for: session))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: Route.tray) {
+                    Label("Review (\(cleanup.pending.count))", systemImage: "trash")
+                        .labelStyle(.titleAndIcon)
+                }
+                .disabled(cleanup.pending.isEmpty)
+            }
+        }
+        .onAppear(perform: prepare)
+    }
+
+    private func prepare() {
+        guard !prepared else { return }
+        queue = allIDs.filter { !cleanup.kept.contains($0) && !cleanup.isPending($0) }
+        index = 0
+        prepared = true
+    }
+
+    private var rotation: Double {
+        let r = Double((drag.width + flyOff) / 20)
+        return max(-12, min(12, r))
+    }
+
+    private var header: some View {
+        HStack {
+            Text(queue.isEmpty ? "" : "\(min(index + 1, queue.count)) of \(queue.count)")
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.kwTextSecondary)
+            Spacer()
+            Text("← Delete · Keep →")
+                .font(.footnote)
+                .foregroundStyle(Color.kwTextSecondary)
+        }
+        .padding(.top, 8)
+    }
+
+    private func card(for id: String) -> some View {
+        let info = library.byID[id]
+        return GeometryReader { geo in
+            ZStack(alignment: .bottomLeading) {
+                Color.kwSurface
+                AssetImage(id: id, targetSize: geo.size, contentMode: .fit)
+                    .background(Color.black.opacity(0.9))
+                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let date = info?.date {
+                        Text(date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    if let info, info.isVideo {
+                        Label(Duration.seconds(info.duration).formatted(.time(pattern: .minuteSecond)),
+                              systemImage: "video.fill").font(.footnote)
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(16)
+                stamps(for: id)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: KWRadius.card, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+        }
+    }
+
+    @ViewBuilder
+    private func stamps(for id: String) -> some View {
+        if id == current {
+            let progress = (drag.width + flyOff) / 120
+            ZStack {
+                stamp("KEEP", color: .kwKeep).rotationEffect(.degrees(-12))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .opacity(Double(max(0, min(1, progress))))
+                stamp("DELETE", color: .kwDelete).rotationEffect(.degrees(12))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .opacity(Double(max(0, min(1, -progress))))
+            }
+            .padding(24)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func stamp(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(.title, design: .rounded).weight(.heavy))
+            .foregroundStyle(color)
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .overlay(RoundedRectangle(cornerRadius: KWRadius.badge, style: .continuous).stroke(color, lineWidth: 4))
+            .background(Color.kwSurface.opacity(0.85), in: RoundedRectangle(cornerRadius: KWRadius.badge, style: .continuous))
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { drag = $0.translation }
+            .onEnded { value in
+                if value.translation.width > 110 || value.predictedEndTranslation.width > 300 {
+                    decide(.keep)
+                } else if value.translation.width < -110 || value.predictedEndTranslation.width < -300 {
+                    decide(.delete)
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { drag = .zero }
+                }
+            }
+    }
+
+    private func decide(_ decision: Decision) {
+        guard let id = current else { return }
+        switch decision {
+        case .keep: cleanup.keep(id)
+        case .delete: cleanup.markForDeletion(id)
+        }
+        history.append((id, decision))
+        if reduceMotion {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                drag = .zero
+                index += 1
+            }
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                flyOff = decision == .keep ? 600 : -600
+            } completion: {
+                drag = .zero
+                flyOff = 0
+                index += 1
+            }
+        }
+    }
+
+    private func undo() {
+        guard let last = history.popLast() else { return }
+        cleanup.clearDecision(last.id)
+        if let pos = queue.firstIndex(of: last.id) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                index = pos
+                drag = .zero
+                flyOff = 0
+            }
+        }
+    }
+
+    private var controls: some View {
+        HStack(spacing: 28) {
+            roundButton("xmark", color: .kwDelete, label: "Mark for deletion") { decide(.delete) }
+                .disabled(current == nil)
+            roundButton("arrow.uturn.backward", color: .kwTextSecondary, label: "Undo", small: true) { undo() }
+                .disabled(history.isEmpty)
+            roundButton("heart.fill", color: .kwKeep, label: "Keep") { decide(.keep) }
+                .disabled(current == nil)
+        }
+    }
+
+    private func roundButton(_ icon: String, color: Color, label: String, small: Bool = false,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: small ? 20 : 26, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: small ? 52 : 68, height: small ? 52 : 68)
+                .background(Color.kwSurface, in: Circle())
+                .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        }
+        .accessibilityLabel(label)
+    }
+
+    private var doneView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 56)).foregroundStyle(Color.kwBrandTeal)
+            Text(allIDs.isEmpty ? "Nothing here" : "All reviewed")
+                .font(.title.weight(.bold))
+            Text(cleanup.pending.isEmpty
+                 ? "Nothing is marked for deletion."
+                 : "\(cleanup.pending.count) items are waiting in your review tray.")
+                .foregroundStyle(Color.kwTextSecondary)
+                .multilineTextAlignment(.center)
+            if !cleanup.pending.isEmpty {
+                NavigationLink("Review and delete", value: Route.tray)
+                    .buttonStyle(PrimaryButtonStyle())
+            }
+            if !allIDs.isEmpty {
+                Button("Start this session over") {
+                    cleanup.resetKept(for: allIDs)
+                    prepared = false
+                    history = []
+                    prepare()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.kwBrandTealText)
+            }
+        }
+        .padding()
+    }
+}

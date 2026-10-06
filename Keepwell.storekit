@@ -1,0 +1,94 @@
+{
+  "appPolicies": {
+    "eula": "",
+    "policies": [
+      {
+        "locale": "en_US",
+        "policyText": "",
+        "policyURL": ""
+      }
+    ]
+  },
+  "identifier": "8F1A2B3C",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "24.99",
+      "familyShareable": false,
+      "internalID": "6740000003",
+      "localizations": [
+        {
+          "description": "Pay once, keep Keepwell Pro forever.",
+          "displayName": "Keepwell Pro Lifetime",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.nimbuswebdesign.keepwell.pro.lifetime",
+      "referenceName": "Keepwell Pro Lifetime",
+      "type": "NonConsumable"
+    }
+  ],
+  "settings": {
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [
+    {
+      "id": "21500001",
+      "localizations": [],
+      "name": "Keepwell Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "14.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "6740000002",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Unlimited deletes and every Keepwell Pro feature.",
+              "displayName": "Keepwell Pro Yearly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.nimbuswebdesign.keepwell.pro.yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Keepwell Pro Yearly",
+          "subscriptionGroupID": "21500001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "3.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "6740000001",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Unlimited deletes and every Keepwell Pro feature.",
+              "displayName": "Keepwell Pro Monthly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.nimbuswebdesign.keepwell.pro.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Keepwell Pro Monthly",
+          "subscriptionGroupID": "21500001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}
