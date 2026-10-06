@@ -10,6 +10,23 @@ struct SimilarPair: Sendable {
     let distance: Float
 }
 
+/// Scan progress, observed by DuplicatesView.
+enum DuplicateScanPhase: Equatable, Sendable {
+    case idle
+    case scanning(done: Int, total: Int)
+    case ready
+}
+
+enum DuplicateScanEvent: Sendable {
+    case progress(Int, Int)
+    case finished([SimilarPair])
+}
+
+/// Receives the synchronous PHImageManager result without mutating a captured local.
+private final class ImageBox: @unchecked Sendable {
+    var cgImage: CGImage?
+}
+
 /// On-device scan: Vision feature prints compared only within time buckets (photos taken close together).
 enum DuplicateScanner {
     /// Photos further apart than this are never compared.
@@ -37,12 +54,12 @@ enum DuplicateScanner {
         for (index, item) in items.enumerated() {
             autoreleasepool {
                 guard let asset = assetByID[item.id] else { return }
-                var cgImage: CGImage?
+                let box = ImageBox()
                 manager.requestImage(for: asset, targetSize: CGSize(width: 384, height: 384),
                                      contentMode: .aspectFit, options: options) { image, _ in
-                    cgImage = image?.cgImage
+                    box.cgImage = image?.cgImage
                 }
-                guard let cgImage else { return }
+                guard let cgImage = box.cgImage else { return }
                 hashes[index] = differenceHash(cgImage)
                 let request = VNGenerateImageFeaturePrintRequest()
                 request.revision = VNGenerateImageFeaturePrintRequestRevision2
@@ -113,11 +130,7 @@ enum DuplicateScanner {
 @MainActor
 @Observable
 final class DuplicateEngine {
-    enum Phase: Equatable {
-        case idle
-        case scanning(done: Int, total: Int)
-        case ready
-    }
+    typealias Phase = DuplicateScanPhase
 
     private(set) var phase: Phase = .idle
     private(set) var groups: [DuplicateGroup] = []
@@ -172,7 +185,7 @@ final class DuplicateEngine {
         let generation = library.generation
         items = snapshot
         phase = .scanning(done: 0, total: snapshot.count)
-        let stream = AsyncStream<ScanEvent> { continuation in
+        let stream = AsyncStream<DuplicateScanEvent> { continuation in
             Task.detached(priority: .userInitiated) {
                 let result = DuplicateScanner.run(items: snapshot) { done, total in
                     continuation.yield(.progress(done, total))
@@ -190,6 +203,15 @@ final class DuplicateEngine {
             }
         }
         scannedGeneration = generation
+        overrides = [:]
+        regroup()
+        phase = .ready
+    }
+
+    /// Seeds the cached scan result directly (unit tests and previews). Regroups immediately.
+    func loadCached(items: [AssetInfo], pairs: [SimilarPair]) {
+        self.items = items
+        self.pairs = pairs
         overrides = [:]
         regroup()
         phase = .ready
@@ -226,10 +248,5 @@ final class DuplicateEngine {
         if info.isScreenshot { s -= 5 }
         s += (info.date?.timeIntervalSince1970 ?? 0) / 1e12
         return s
-    }
-
-    private enum ScanEvent: Sendable {
-        case progress(Int, Int)
-        case finished([SimilarPair])
     }
 }

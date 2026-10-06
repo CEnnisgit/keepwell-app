@@ -22,13 +22,9 @@ struct LibrarySnapshot: Sendable {
     var onThisDay: [String] = []
     var screenshots: [String] = []
 
-    static func load(now: Date = .now) -> LibrarySnapshot {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d",
-                                        PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
-        let result = PHAsset.fetchAssets(with: options)
-        let cal = Calendar.current
+    /// Pure bucketing: months (newest month first, items oldest first inside), On this day, image list.
+    /// `newestFirst` must be sorted by creation date descending, which is how `load` fetches.
+    static func bucket(newestFirst: [AssetInfo], now: Date = .now, calendar cal: Calendar = .current) -> LibrarySnapshot {
         let today = cal.dateComponents([.year, .month, .day], from: now)
 
         var snap = LibrarySnapshot()
@@ -38,8 +34,7 @@ struct LibrarySnapshot: Sendable {
         var images: [AssetInfo] = []
         var onThisDay: [String] = []
 
-        for i in 0..<result.count {
-            let info = AssetInfo(result.object(at: i))
+        for info in newestFirst {
             snap.byID[info.id] = info
             if !info.isVideo { images.append(info) }
             let key: String
@@ -64,6 +59,19 @@ struct LibrarySnapshot: Sendable {
         }
         snap.imagesOldestFirst = images.reversed()
         snap.onThisDay = onThisDay.reversed()
+        return snap
+    }
+
+    static func load(now: Date = .now) -> LibrarySnapshot {
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        options.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d",
+                                        PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
+        let result = PHAsset.fetchAssets(with: options)
+        var newestFirst: [AssetInfo] = []
+        newestFirst.reserveCapacity(result.count)
+        for i in 0..<result.count { newestFirst.append(AssetInfo(result.object(at: i))) }
+        var snap = bucket(newestFirst: newestFirst, now: now)
 
         // Built-in Screenshots smart album, oldest first.
         let albums = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumScreenshots, options: nil)

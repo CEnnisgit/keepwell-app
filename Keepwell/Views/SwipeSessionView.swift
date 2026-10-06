@@ -60,6 +60,12 @@ struct SwipeSessionView: View {
         queue = allIDs.filter { !cleanup.kept.contains($0) && !cleanup.isPending($0) }
         index = 0
         prepared = true
+        #if DEBUG
+        // Screenshot hook: hold the top card mid-swipe so the Keep stamp and rotation are visible.
+        if UserDefaults.standard.string(forKey: "KWScreen") == "swipe" {
+            drag = CGSize(width: 84, height: -12)
+        }
+        #endif
     }
 
     private var rotation: Double {

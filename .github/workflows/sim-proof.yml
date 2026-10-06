@@ -1,0 +1,141 @@
+name: sim-proof
+
+# Builds Keepwell for the iOS Simulator (no signing), runs the unit tests, seeds a small photo
+# library, drives every DEBUG screenshot hook and uploads the evidence as the `keepwell-proof` artifact.
+# Private repo on free macOS minutes (10x): runs only on feat/sim-build pushes or by hand.
+
+on:
+  push:
+    branches: [feat/sim-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sim-proof:
+    name: Build, test and screenshot in the Simulator
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      BUNDLE_ID: com.nimbuswebdesign.keepwell
+      DERIVED: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        shell: bash
+        run: |
+          mkdir -p proof
+          xcodebuild -version
+          sw_vers
+          brew install xcodegen 2>&1 | tail -n 3
+          xcodegen --version
+
+      - name: Generate project
+        shell: bash
+        run: xcodegen generate 2>&1 | tee proof/xcodegen.log
+
+      - name: Pick simulator
+        id: sim
+        shell: bash
+        run: |
+          UDID=$(scripts/sim/pick-device.sh proof/device.txt)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          cat proof/device.txt
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build (Simulator, no signing)
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Keepwell.xcodeproj -scheme Keepwell -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee proof/build.log
+          grep -q '\*\* BUILD SUCCEEDED \*\*' proof/build.log
+          ERRORS=$(grep -c 'error:' proof/build.log || true)
+          echo "error: lines in build.log: $ERRORS"
+          test "$ERRORS" -eq 0
+          test -d "$DERIVED/Build/Products/Debug-iphonesimulator/Keepwell.app"
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Keepwell.xcodeproj -scheme Keepwell -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee proof/test.log
+          grep -q '\*\* TEST SUCCEEDED \*\*' proof/test.log
+          grep -E 'Executed [0-9]+ tests?, with 0 failures' proof/test.log | tail -n 1
+
+      - name: Seed photo library
+        shell: bash
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          swiftc -O scripts/sim/gen-media.swift -o "$RUNNER_TEMP/gen-media"
+          "$RUNNER_TEMP/gen-media" "$RUNNER_TEMP/media" "$(date +%Y-%m-%d)"
+          cp "$RUNNER_TEMP/media/manifest.tsv" proof/media-manifest.tsv
+          xcrun simctl addmedia "$UDID" "$RUNNER_TEMP"/media/*.jpg "$RUNNER_TEMP"/media/*.png
+          sleep 8
+
+      - name: Install app and prepare the Simulator
+        shell: bash
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          xcrun simctl install "$UDID" "$DERIVED/Build/Products/Debug-iphonesimulator/Keepwell.app"
+          xcrun simctl privacy "$UDID" grant photos "$BUNDLE_ID"
+          xcrun simctl ui "$UDID" appearance light
+          xcrun simctl status_bar "$UDID" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+
+      - name: Capture screenshot hooks
+        shell: bash
+        run: scripts/sim/capture.sh "${{ steps.sim.outputs.udid }}" proof/screens
+
+      - name: Verify screenshot sizes
+        shell: bash
+        run: |
+          : > proof/sizes.txt
+          fail=0; count=0
+          for f in proof/screens/*.png; do
+            count=$((count + 1))
+            w=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            h=$(sips -g pixelHeight "$f" | awk '/pixelHeight/ {print $2}')
+            echo "$(basename "$f") ${w}x${h}" | tee -a proof/sizes.txt
+            if [ "$w" != "1320" ] || [ "$h" != "2868" ]; then fail=1; fi
+          done
+          echo "count: $count" | tee -a proof/sizes.txt
+          test "$count" -eq 11
+          test "$fail" -eq 0
+
+      - name: Diagnostics (on failure)
+        if: failure()
+        shell: bash
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          mkdir -p proof/diag
+          [ -n "$UDID" ] || exit 0
+          xcrun simctl io "$UDID" screenshot --type=png proof/diag/last-screen.png || true
+          xcrun simctl spawn "$UDID" log show --last 15m --predicate 'process == "Keepwell" OR process == "photolibraryd" OR process == "assetsd"' \
+            > proof/diag/sim-log.txt 2>&1 || true
+          xcrun simctl listapps "$UDID" > proof/diag/apps.txt 2>&1 || true
+
+      - name: Upload proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepwell-proof
+          path: proof/
+          if-no-files-found: error
+          retention-days: 30

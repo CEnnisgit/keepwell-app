@@ -13,6 +13,18 @@ struct AssetInfo: Sendable, Hashable, Identifiable {
     let isFavorite: Bool
     let isScreenshot: Bool
 
+    init(id: String, date: Date?, isVideo: Bool = false, duration: TimeInterval = 0,
+         pixelWidth: Int = 0, pixelHeight: Int = 0, isFavorite: Bool = false, isScreenshot: Bool = false) {
+        self.id = id
+        self.date = date
+        self.isVideo = isVideo
+        self.duration = duration
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.isFavorite = isFavorite
+        self.isScreenshot = isScreenshot
+    }
+
     init(_ asset: PHAsset) {
         id = asset.localIdentifier
         date = asset.creationDate

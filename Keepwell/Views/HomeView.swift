@@ -185,14 +185,16 @@ struct HomeView: View {
         }
     }
 
-    // MARK: Debug launch hooks for Simulator screenshots: -KWScreen paywall|month|duplicates|freed|explainer|tray|settings
+    // MARK: Debug launch hooks for Simulator screenshots:
+    // -KWScreen home|swipe|month|onthisday|screenshots|duplicates|tray|explainer|freed|paywall|settings
     private func runDebugLaunchIfNeeded() async {
         #if DEBUG
         guard !didRunDebugLaunch, let screen = UserDefaults.standard.string(forKey: "KWScreen") else { return }
         didRunDebugLaunch = true
         switch screen {
+        case "home": break
         case "paywall": cleanup.showPaywall = true
-        case "month": if let m = library.months.first { path = [.session(.month(m.id))] }
+        case "month", "swipe": if let m = library.months.first { path = [.session(.month(m.id))] }
         case "onthisday": path = [.session(.onThisDay)]
         case "screenshots": path = [.session(.screenshots)]
         case "duplicates": path = [.duplicates]

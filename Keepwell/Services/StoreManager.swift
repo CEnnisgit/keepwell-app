@@ -16,7 +16,10 @@ final class StoreManager {
     private(set) var purchasedProductIDs: Set<String> = []
     private(set) var isLoadingProducts = false
     private(set) var isPurchasing = false
+    /// Purchase / restore problems, shown as an alert.
     var errorMessage: String?
+    /// Why prices are missing (no StoreKit configuration, offline). Shown inline, never as an alert.
+    private(set) var productLoadError: String?
 
     var isPro: Bool { !purchasedProductIDs.isEmpty }
     var activePlanName: String? {
@@ -47,8 +50,9 @@ final class StoreManager {
         do {
             let loaded = try await Product.products(for: ProductID.all)
             products = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, $0) })
+            productLoadError = loaded.isEmpty ? "Prices aren't available right now." : nil
         } catch {
-            errorMessage = "Couldn't load prices. \(error.localizedDescription)"
+            productLoadError = "Couldn't load prices. \(error.localizedDescription)"
         }
     }
 
