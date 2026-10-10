@@ -20,6 +20,8 @@ final class CleanupStore {
     /// Marked for deletion, in the order they were swiped.
     private(set) var pending: [String] = []
     private(set) var kept: Set<String> = []
+    /// Per-month record of swiped assets, so a month resumes where it was left and can show Done.
+    private(set) var monthProgress = MonthProgress()
     private(set) var totalFreedBytes: Int
     private(set) var totalDeletedCount: Int
     private(set) var hasSeenExplainer: Bool
@@ -45,6 +47,7 @@ final class CleanupStore {
         dailyDay = defaults.object(forKey: Keys.dailyDeleteDay) as? Date ?? .distantPast
         dailyCount = defaults.integer(forKey: Keys.dailyDeleteCount)
         loadState()
+        monthProgress = MonthProgress.load(from: progressURL)
     }
 
     // MARK: Swipe decisions
@@ -81,6 +84,30 @@ final class CleanupStore {
         pending.removeAll { !validIDs.contains($0) }
         kept = kept.intersection(validIDs)
         if before != (pending.count, kept.count) { saveState() }
+        if monthProgress.prune(validIDs: validIDs) { saveProgress() }
+    }
+
+    // MARK: Month progress
+
+    func recordReviewed(_ id: String, inMonth monthID: String) {
+        guard !monthProgress.isReviewed(id, in: monthID) else { return }
+        monthProgress.markReviewed(id, in: monthID)
+        saveProgress()
+    }
+
+    /// Undo of a swipe made in a month.
+    func clearReviewed(_ id: String, inMonth monthID: String) {
+        guard monthProgress.isReviewed(id, in: monthID) else { return }
+        monthProgress.clear(id, in: monthID)
+        saveProgress()
+    }
+
+    /// "Review again": the month starts from its first photo. Kept choices for it are forgotten too;
+    /// photos already in the review tray stay there.
+    func resetMonth(_ month: MonthBucket) {
+        monthProgress.reset(month.id)
+        saveProgress()
+        resetKept(for: month.assetIDs)
     }
 
     func resetKept(for ids: [String]) {
@@ -216,6 +243,14 @@ final class CleanupStore {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("review-state.json")
+    }
+
+    private var progressURL: URL {
+        stateURL.deletingLastPathComponent().appendingPathComponent("month-progress.json")
+    }
+
+    private func saveProgress() {
+        try? monthProgress.save(to: progressURL)
     }
 
     private func loadState() {

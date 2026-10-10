@@ -10,25 +10,36 @@ struct SwipeSessionView: View {
     @State private var queue: [String] = []
     @State private var index = 0
     @State private var history: [(id: String, decision: Decision)] = []
-    @State private var drag: CGSize = .zero
+    @State private var gesture = CardGestureState()
     @State private var flyOff: CGFloat = 0
     @State private var prepared = false
 
     private var current: String? { index < queue.count ? queue[index] : nil }
     private var allIDs: [String] { library.ids(for: session) }
+    private var drag: CGSize { gesture.swipe }
+    /// Month sessions walk the whole month and skip what was already swiped, so the header reads
+    /// "121 of 340" and the month resumes at its first unreviewed photo.
+    private var monthID: String? {
+        if case .month(let id) = session { return id }
+        return nil
+    }
+    private var springOrNone: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8) }
 
     var body: some View {
         VStack(spacing: 16) {
             header
             ZStack {
                 if let current {
-                    if index + 1 < queue.count {
-                        card(for: queue[index + 1]).scaleEffect(0.95).opacity(0.6).allowsHitTesting(false)
+                    if nextIndex(after: index) < queue.count {
+                        card(for: queue[nextIndex(after: index)]).scaleEffect(0.95).opacity(0.6).allowsHitTesting(false)
                     }
-                    card(for: current)
+                    card(for: current, isTop: true)
                         .offset(x: drag.width + flyOff, y: drag.height * 0.2)
                         .rotationEffect(.degrees(rotation))
                         .gesture(dragGesture)
+                        .simultaneousGesture(pinchGesture)
+                        .onTapGesture(count: 2) { toggleZoom() }
+                        .accessibilityAction(named: Text(gesture.isZoomed ? "Zoom out" : "Zoom in")) { toggleZoom() }
                         .id(current)
                         .transition(.opacity)
                 } else if prepared {
@@ -53,19 +64,39 @@ struct SwipeSessionView: View {
             }
         }
         .onAppear(perform: prepare)
+        .onChange(of: current) { old, _ in if old != nil { gesture.reset() } }
     }
 
     private func prepare() {
         guard !prepared else { return }
-        queue = allIDs.filter { !cleanup.kept.contains($0) && !cleanup.isPending($0) }
-        index = 0
+        if let monthID, let month = library.month(monthID) {
+            queue = month.assetIDs
+            index = cleanup.monthProgress.resumeIndex(in: month)
+        } else {
+            queue = allIDs.filter { !cleanup.kept.contains($0) && !cleanup.isPending($0) }
+            index = 0
+        }
         prepared = true
         #if DEBUG
-        // Screenshot hook: hold the top card mid-swipe so the Keep stamp and rotation are visible.
-        if UserDefaults.standard.string(forKey: "KWScreen") == "swipe" {
-            drag = CGSize(width: 84, height: -12)
+        switch UserDefaults.standard.string(forKey: "KWScreen") {
+        case "swipe":
+            // Screenshot hook: hold the top card mid-swipe so the Keep stamp and rotation are visible.
+            gesture.debugHoldSwipe(CGSize(width: 84, height: -12))
+        case "zoom":
+            // Screenshot hook: the top card double-tapped to 2.5x, which also requests the detail image.
+            gesture.doubleTap()
+            KWDebugState.set(["zoomScale": Double(gesture.scale), "zoomBlocksDecide": !gesture.canDecide,
+                              "zoomCurrent": current ?? ""])
+        default:
+            break
         }
         #endif
+    }
+
+    /// Next position to show after `position`: the following unswiped photo in a month, else simply the next one.
+    private func nextIndex(after position: Int) -> Int {
+        guard let monthID else { return position + 1 }
+        return cleanup.monthProgress.nextUnreviewed(in: monthID, ids: queue, from: position + 1)
     }
 
     private var rotation: Double {
@@ -80,22 +111,38 @@ struct SwipeSessionView: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.kwTextSecondary)
             Spacer()
-            Text("← Delete · Keep →")
+            Text(gesture.isZoomed ? "Pinch or double-tap to zoom out" : "← Delete · Keep →")
                 .font(.footnote)
                 .foregroundStyle(Color.kwTextSecondary)
         }
         .padding(.top, 8)
     }
 
-    private func card(for id: String) -> some View {
+    private func card(for id: String, isTop: Bool = false) -> some View {
         let info = library.byID[id]
+        let zoom = isTop ? gesture.scale : 1
+        let pan = isTop ? gesture.offset : .zero
         return GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
                 Color.kwSurface
-                AssetImage(id: id, targetSize: geo.size, contentMode: .fit)
-                    .background(Color.black.opacity(0.9))
+                Color.black.opacity(0.9)
+                AssetImage(id: id, targetSize: geo.size, contentMode: .fit,
+                           wantsDetail: isTop && gesture.wantsHighResolution)
+                    .scaleEffect(zoom)
+                    .offset(pan)
                 LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+                    .opacity(zoom > 1.01 ? 0 : 1)
                     .allowsHitTesting(false)
+                if isTop && zoom > 1.01 {
+                    Text("\(Double(zoom), format: .number.precision(.fractionLength(1)))×")
+                        .font(.footnote.weight(.semibold)).monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(16)
+                        .accessibilityLabel("Zoomed \(Double(zoom), format: .number.precision(.fractionLength(1))) times")
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     if let date = info?.date {
                         Text(date.formatted(date: .abbreviated, time: .shortened))
@@ -108,10 +155,14 @@ struct SwipeSessionView: View {
                 }
                 .foregroundStyle(.white)
                 .padding(16)
+                .opacity(zoom > 1.01 ? 0 : 1)
                 stamps(for: id)
             }
             .clipShape(RoundedRectangle(cornerRadius: KWRadius.card, style: .continuous))
+            .contentShape(Rectangle())
             .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+            .onAppear { if isTop { gesture.container = geo.size } }
+            .onChange(of: geo.size) { _, size in if isTop { gesture.container = size } }
         }
     }
 
@@ -141,39 +192,53 @@ struct SwipeSessionView: View {
             .background(Color.kwSurface.opacity(0.85), in: RoundedRectangle(cornerRadius: KWRadius.badge, style: .continuous))
     }
 
+    /// One finger: swipes at 1x, pans when zoomed. A drag that began zoomed or met a pinch never commits.
     private var dragGesture: some Gesture {
         DragGesture()
-            .onChanged { drag = $0.translation }
+            .onChanged { gesture.dragChanged($0.translation) }
             .onEnded { value in
-                if value.translation.width > 110 || value.predictedEndTranslation.width > 300 {
-                    decide(.keep)
-                } else if value.translation.width < -110 || value.predictedEndTranslation.width < -300 {
-                    decide(.delete)
-                } else {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { drag = .zero }
+                let commit = gesture.dragEnded(translation: value.translation, predictedEnd: value.predictedEndTranslation)
+                switch commit {
+                case .keep: decide(.keep)
+                case .delete: decide(.delete)
+                case nil: withAnimation(springOrNone) { gesture.cancelSwipe() }
                 }
             }
     }
 
+    private var pinchGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { gesture.pinchChanged($0.magnification) }
+            .onEnded { _ in withAnimation(springOrNone) { gesture.pinchEnded() } }
+    }
+
+    private func toggleZoom() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { gesture.doubleTap() }
+    }
+
     private func decide(_ decision: Decision) {
-        guard let id = current else { return }
+        guard let id = current, gesture.canDecide else { return }
         switch decision {
         case .keep: cleanup.keep(id)
         case .delete: cleanup.markForDeletion(id)
         }
+        if let month = monthID ?? library.monthByID[id] {
+            cleanup.recordReviewed(id, inMonth: month)
+        }
         history.append((id, decision))
+        let next = nextIndex(after: index)
         if reduceMotion {
             withAnimation(.easeInOut(duration: 0.2)) {
-                drag = .zero
-                index += 1
+                gesture.reset()
+                index = next
             }
         } else {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                 flyOff = decision == .keep ? 600 : -600
             } completion: {
-                drag = .zero
+                gesture.reset()
                 flyOff = 0
-                index += 1
+                index = next
             }
         }
     }
@@ -181,10 +246,13 @@ struct SwipeSessionView: View {
     private func undo() {
         guard let last = history.popLast() else { return }
         cleanup.clearDecision(last.id)
+        if let month = monthID ?? library.monthByID[last.id] {
+            cleanup.clearReviewed(last.id, inMonth: month)
+        }
         if let pos = queue.firstIndex(of: last.id) {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            withAnimation(springOrNone) {
                 index = pos
-                drag = .zero
+                gesture.reset()
                 flyOff = 0
             }
         }
@@ -193,11 +261,11 @@ struct SwipeSessionView: View {
     private var controls: some View {
         HStack(spacing: 28) {
             roundButton("xmark", color: .kwDelete, label: "Mark for deletion") { decide(.delete) }
-                .disabled(current == nil)
+                .disabled(current == nil || !gesture.canDecide)
             roundButton("arrow.uturn.backward", color: .kwTextSecondary, label: "Undo", small: true) { undo() }
                 .disabled(history.isEmpty)
             roundButton("heart.fill", color: .kwKeep, label: "Keep") { decide(.keep) }
-                .disabled(current == nil)
+                .disabled(current == nil || !gesture.canDecide)
         }
     }
 
@@ -229,7 +297,16 @@ struct SwipeSessionView: View {
                 NavigationLink("Review and delete", value: Route.tray)
                     .buttonStyle(PrimaryButtonStyle())
             }
-            if !allIDs.isEmpty {
+            if let monthID, let month = library.month(monthID) {
+                Button("Review again") {
+                    cleanup.resetMonth(month)
+                    prepared = false
+                    history = []
+                    prepare()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.kwBrandTealText)
+            } else if !allIDs.isEmpty {
                 Button("Start this session over") {
                     cleanup.resetKept(for: allIDs)
                     prepared = false

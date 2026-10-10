@@ -18,6 +18,8 @@ final class LibraryObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
 struct LibrarySnapshot: Sendable {
     var months: [MonthBucket] = []
     var byID: [String: AssetInfo] = [:]
+    /// Asset id -> MonthBucket.id.
+    var monthByID: [String: String] = [:]
     var imagesOldestFirst: [AssetInfo] = []
     var onThisDay: [String] = []
     var screenshots: [String] = []
@@ -51,6 +53,7 @@ struct LibrarySnapshot: Sendable {
                 key = "0000-00"
                 monthTitles[key] = "Undated"
             }
+            snap.monthByID[info.id] = key
             if monthIDs[key] == nil { monthOrder.append(key); monthIDs[key] = [] }
             monthIDs[key]?.append(info.id)
         }
@@ -91,6 +94,7 @@ final class PhotoLibrary {
     var status: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     var months: [MonthBucket] = []
     var byID: [String: AssetInfo] = [:]
+    var monthByID: [String: String] = [:]
     var imagesOldestFirst: [AssetInfo] = []
     var onThisDay: [String] = []
     var screenshots: [String] = []
@@ -150,6 +154,7 @@ final class PhotoLibrary {
         guard changed else { return }
         months = snap.months
         byID = snap.byID
+        monthByID = snap.monthByID
         imagesOldestFirst = snap.imagesOldestFirst
         onThisDay = snap.onThisDay
         screenshots = snap.screenshots
@@ -163,6 +168,8 @@ final class PhotoLibrary {
         case .screenshots: return screenshots
         }
     }
+
+    func month(_ id: String) -> MonthBucket? { months.first { $0.id == id } }
 
     func title(for session: ReviewSession) -> String {
         switch session {

@@ -15,6 +15,29 @@ enum ImageLoader {
             }
         }
     }
+
+    /// Zoom-quality image: opportunistic delivery (a quick degraded frame, then the full one) from what is
+    /// already on the device. Network access is off, so an iCloud-only original simply never upgrades.
+    /// The request is cancelled when the consumer stops iterating.
+    static func detailImages(for id: String, size: CGSize) -> AsyncStream<UIImage> {
+        AsyncStream { continuation in
+            guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
+                continuation.finish()
+                return
+            }
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .opportunistic
+            options.resizeMode = .exact
+            options.isNetworkAccessAllowed = false
+            let requestID = PHImageManager.default().requestImage(for: asset, targetSize: size, contentMode: .aspectFit,
+                                                                  options: options) { image, info in
+                if let image { continuation.yield(image) }
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if !degraded || image == nil { continuation.finish() }
+            }
+            continuation.onTermination = { _ in PHImageManager.default().cancelImageRequest(requestID) }
+        }
+    }
 }
 
 enum AssetBytes {
