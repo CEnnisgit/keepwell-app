@@ -34,17 +34,20 @@ To test purchases against `Keepwell.storekit`, open `Keepwell.xcodeproj` in Xcod
 
 ### Screenshot hooks (DEBUG builds only)
 `xcrun simctl launch $UDID com.nimbuswebdesign.keepwell -KWScreen <screen>`, where `<screen>` is one of
-`home`, `swipe`, `month`, `onthisday`, `screenshots`, `duplicates`, `tray`, `explainer`, `freed`, `paywall` or `settings`.
+`home`, `swipe`, `month`, `onthisday`, `screenshots`, `duplicates`, `tray`, `explainer`, `freed`, `paywall`, `settings`, `months` or `zoom`.
 `swipe` opens the newest month with the top card held mid-swipe so the Keep stamp shows. `tray` marks the newest month's first 6 items.
 `freed` shows the real summary screen for the newest month's first 9 items **without deleting anything**.
+`months` saves progress for the newest month (half reviewed) and the next one (Done) and scrolls to the month list; it writes
+real saved progress, so the proof job runs it last. `zoom` opens the newest month with the top card at 2.5x.
 
 ## Tests and CI proof
 `KeepwellTests` (XCTest, runs in the Simulator) covers the pure logic: month / On this day bucketing, swipe decisions and pruning,
-the midnight quota reset, the How-similar threshold and live regrouping, keep-best order, the dHash fallback, product IDs and locked prices.
+the midnight quota reset, the How-similar threshold and live regrouping, keep-best order, the dHash fallback, product IDs and locked prices,
+per-month saved progress (save/restore, resume, Done, new photos, pruning, Review again) and the swipe card's zoom gesture rules.
 ```bash
 xcodebuild test -scheme Keepwell -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' CODE_SIGNING_ALLOWED=NO
 ```
-`.github/workflows/sim-proof.yml` (branch `feat/sim-build` or manual) builds, tests, seeds a generated photo library
+`.github/workflows/sim-proof.yml` (branches `feat/sim-build` and `feat/month-progress-zoom`, or manual) builds, tests, seeds a generated photo library
 (`scripts/sim/gen-media.swift`), drives every hook above and uploads `build.log`, `test.log`, `device.txt`, `sizes.txt` and the
 1320x2868 screenshots as the `keepwell-proof` artifact. `docs/SPEC-CHECKLIST.md` maps each SPEC.md requirement to code and proof.
 

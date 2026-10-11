@@ -8,19 +8,25 @@ struct HomeView: View {
     @AppStorage(CleanupStore.Keys.totalDeletedCount) private var totalDeletedCount = 0
     @State private var path: [Route] = []
     @State private var didRunDebugLaunch = false
+    @State private var scrollToMonths = false
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    freedCard
-                    if library.isLimited { limitedBanner }
-                    if !cleanup.pending.isEmpty { trayCard }
-                    sessionCards
-                    monthsSection
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        freedCard
+                        if library.isLimited { limitedBanner }
+                        if !cleanup.pending.isEmpty { trayCard }
+                        sessionCards
+                        monthsSection.id("months")
+                    }
+                    .padding(.horizontal, KWLayout.screenPadding)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal, KWLayout.screenPadding)
-                .padding(.bottom, 32)
+                .onChange(of: scrollToMonths) { _, go in
+                    if go { proxy.scrollTo("months", anchor: .top) }
+                }
             }
             .background(Color.kwBackground.ignoresSafeArea())
             .navigationTitle("Keepwell")
@@ -173,9 +179,9 @@ struct HomeView: View {
             }
             VStack(spacing: 0) {
                 ForEach(library.months) { month in
-                    Button { path.append(.session(.month(month.id))) } label: {
-                        MonthRow(month: month)
-                    }
+                    MonthRow(month: month,
+                             open: { path.append(.session(.month(month.id))) },
+                             reviewAgain: { cleanup.resetMonth(month) })
                     if month.id != library.months.last?.id {
                         Divider().overlay(Color.kwSeparator).padding(.leading, 72)
                     }
@@ -186,7 +192,7 @@ struct HomeView: View {
     }
 
     // MARK: Debug launch hooks for Simulator screenshots:
-    // -KWScreen home|swipe|month|onthisday|screenshots|duplicates|tray|explainer|freed|paywall|settings
+    // -KWScreen home|swipe|month|onthisday|screenshots|duplicates|tray|explainer|freed|paywall|settings|months|zoom
     private func runDebugLaunchIfNeeded() async {
         #if DEBUG
         guard !didRunDebugLaunch, let screen = UserDefaults.standard.string(forKey: "KWScreen") else { return }
@@ -194,7 +200,19 @@ struct HomeView: View {
         switch screen {
         case "home": break
         case "paywall": cleanup.showPaywall = true
-        case "month", "swipe": if let m = library.months.first { path = [.session(.month(m.id))] }
+        case "month", "swipe", "zoom": if let m = library.months.first { path = [.session(.month(m.id))] }
+        case "months":
+            // Newest month half swiped, the next one fully swiped (Done). Writes real saved progress.
+            if let first = library.months.first {
+                cleanup.resetMonth(first)
+                for id in first.assetIDs.prefix(max(1, first.assetIDs.count / 2)) { cleanup.recordReviewed(id, inMonth: first.id) }
+            }
+            if library.months.count > 1 {
+                let second = library.months[1]
+                for id in second.assetIDs { cleanup.recordReviewed(id, inMonth: second.id) }
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            scrollToMonths = true
         case "onthisday": path = [.session(.onThisDay)]
         case "screenshots": path = [.session(.screenshots)]
         case "duplicates": path = [.duplicates]
@@ -207,6 +225,15 @@ struct HomeView: View {
         case "freed":
             await cleanup.debugShowSummary(for: Array((library.months.first?.assetIDs ?? []).prefix(9)))
         default: break
+        }
+        let progress = cleanup.monthProgress
+        let reviewedCounts: [Int] = library.months.map { progress.reviewedCount(in: $0) }
+        let monthsDone: Int = library.months.filter { progress.isDone($0) }.count
+        var monthsPartial = 0
+        var monthProgress: [String] = []
+        for (month, n) in zip(library.months, reviewedCounts) {
+            if n > 0 && n < month.assetIDs.count { monthsPartial += 1 }
+            monthProgress.append("\(month.id):\(n)/\(month.assetIDs.count)")
         }
         KWDebugState.set([
             "screen": screen,
@@ -222,6 +249,9 @@ struct HomeView: View {
             "summaryCount": cleanup.summary?.count ?? 0,
             "summaryBytes": Int(cleanup.summary?.bytes ?? 0),
             "path": path.map { "\($0)" }.joined(separator: ">"),
+            "monthsDone": monthsDone,
+            "monthsPartial": monthsPartial,
+            "monthProgress": monthProgress,
             "ready": true,
         ])
         #endif
@@ -230,28 +260,72 @@ struct HomeView: View {
 
 private struct MonthRow: View {
     let month: MonthBucket
+    let open: () -> Void
+    let reviewAgain: () -> Void
     @Environment(CleanupStore.self) private var cleanup
 
     var body: some View {
-        let reviewed = month.assetIDs.filter { cleanup.kept.contains($0) || cleanup.isPending($0) }.count
+        let total = month.assetIDs.count
+        let reviewed = cleanup.monthProgress.reviewedCount(in: month)
+        let done = cleanup.monthProgress.isDone(month)
+        let items = "\(total) \(total == 1 ? "item" : "items")"
+        let progress = "\(reviewed) of \(total)"
         HStack(spacing: 12) {
-            if let cover = month.assetIDs.last {
-                Thumbnail(id: cover, side: 48).frame(width: 48)
+            Button(action: open) {
+                HStack(spacing: 12) {
+                    if let cover = month.assetIDs.last {
+                        Thumbnail(id: cover, side: 48).frame(width: 48)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(month.title).font(.body.weight(.semibold)).foregroundStyle(Color.kwTextPrimary)
+                        if done {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.kwKeep)
+                                Text("Done").fontWeight(.semibold).foregroundStyle(Color.kwTextPrimary)
+                                Text("· \(progress)").foregroundStyle(Color.kwTextSecondary)
+                            }
+                            .font(.footnote)
+                        } else if reviewed > 0 {
+                            Text("\(progress) reviewed")
+                                .font(.footnote).monospacedDigit().foregroundStyle(Color.kwTextSecondary)
+                            ProgressView(value: Double(reviewed), total: Double(max(1, total)))
+                                .tint(Color.kwBrandTeal)
+                                .frame(maxWidth: 140)
+                        } else {
+                            Text(items).font(.footnote).foregroundStyle(Color.kwTextSecondary)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if !done {
+                        Image(systemName: "chevron.right").foregroundStyle(Color.kwTextSecondary)
+                    }
+                }
+                .contentShape(Rectangle())
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(month.title).font(.body.weight(.semibold)).foregroundStyle(Color.kwTextPrimary)
-                Text(reviewed == 0 ? "\(month.assetIDs.count) \(month.assetIDs.count == 1 ? "item" : "items")"
-                     : "\(reviewed) of \(month.assetIDs.count) reviewed")
-                    .font(.footnote).foregroundStyle(Color.kwTextSecondary)
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(done ? "\(month.title), Done, \(progress) reviewed"
+                                : reviewed > 0 ? "\(month.title), \(progress) reviewed" : "\(month.title), \(items)")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { open() }
+            .accessibilityActions {
+                if done { Button("Review again", action: reviewAgain) }
             }
-            Spacer()
-            if reviewed == month.assetIDs.count {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.kwKeep)
+
+            if done {
+                Button(action: reviewAgain) {
+                    Text("Review again")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.kwBrandTealText)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Color.kwBrandTint, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Review \(month.title) again")
+                .accessibilityHint("Clears saved progress for this month")
             }
-            Image(systemName: "chevron.right").foregroundStyle(Color.kwTextSecondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .contentShape(Rectangle())
     }
 }

@@ -99,6 +99,211 @@ final class KeepwellTests: XCTestCase {
         XCTAssertEqual(snap.byID.count, 7)
     }
 
+    // MARK: Per-month saved progress
+
+    private func month(_ id: String, _ ids: [String]) -> MonthBucket {
+        MonthBucket(id: id, title: id, assetIDs: ids)
+    }
+
+    func testMonthProgressSaveRestoreRoundTrip() throws {
+        var progress = MonthProgress()
+        progress.markReviewed("a", in: "2026-09")
+        progress.markReviewed("b", in: "2026-09")
+        progress.markReviewed("z", in: "2026-08")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("progress-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try progress.save(to: url)
+        let restored = MonthProgress.load(from: url)
+        XCTAssertEqual(restored, progress)
+        XCTAssertTrue(restored.isReviewed("b", in: "2026-09"))
+        XCTAssertFalse(restored.isReviewed("z", in: "2026-09"))
+        XCTAssertEqual(MonthProgress.load(from: url.appendingPathExtension("missing")), MonthProgress(),
+                       "a missing file means no progress, not a crash")
+    }
+
+    func testCleanupStorePersistsMonthProgressAcrossLaunches() {
+        let monthID = "test-\(UUID().uuidString)"
+        let ids = (0..<3).map { "\(monthID)-\($0)" }
+        let bucket = month(monthID, ids)
+        let store = CleanupStore()
+        store.recordReviewed(ids[0], inMonth: monthID)
+        store.recordReviewed(ids[1], inMonth: monthID)
+
+        let relaunched = CleanupStore()
+        XCTAssertEqual(relaunched.monthProgress.reviewedCount(in: bucket), 2)
+        XCTAssertEqual(relaunched.monthProgress.resumeIndex(in: bucket), 2)
+
+        relaunched.clearReviewed(ids[1], inMonth: monthID) // Undo
+        XCTAssertEqual(CleanupStore().monthProgress.reviewedCount(in: bucket), 1)
+
+        relaunched.resetMonth(bucket)
+        XCTAssertEqual(CleanupStore().monthProgress.reviewedCount(in: bucket), 0)
+    }
+
+    func testResumeIndexIsFirstUnreviewedPhoto() {
+        let m = month("2026-09", ["p0", "p1", "p2", "p3", "p4"])
+        var progress = MonthProgress()
+        XCTAssertEqual(progress.resumeIndex(in: m), 0)
+        progress.markReviewed("p0", in: m.id)
+        progress.markReviewed("p1", in: m.id)
+        progress.markReviewed("p3", in: m.id)
+        XCTAssertEqual(progress.resumeIndex(in: m), 2)
+        XCTAssertEqual(progress.nextUnreviewed(in: m.id, ids: m.assetIDs, from: 3), 4, "skips p3, already swiped")
+        progress.markReviewed("p2", in: m.id)
+        progress.markReviewed("p4", in: m.id)
+        XCTAssertEqual(progress.resumeIndex(in: m), m.assetIDs.count)
+        XCTAssertEqual(progress.reviewedCount(in: m), 5)
+        progress.markReviewed("p0", in: "2026-08")
+        XCTAssertEqual(progress.reviewedCount(in: m), 5, "other months never count")
+    }
+
+    func testDoneDetectionAndNewPhotoInvalidation() {
+        var progress = MonthProgress()
+        let m = month("2026-09", ["a", "b"])
+        XCTAssertFalse(progress.isDone(m))
+        XCTAssertFalse(progress.isDone(month("empty", [])), "an empty month is never Done")
+        progress.markReviewed("a", in: m.id)
+        XCTAssertFalse(progress.isDone(m))
+        progress.markReviewed("b", in: m.id)
+        XCTAssertTrue(progress.isDone(m))
+
+        let grown = month("2026-09", ["a", "b", "c"]) // a photo added to the month later
+        XCTAssertFalse(progress.isDone(grown))
+        XCTAssertEqual(progress.reviewedCount(in: grown), 2)
+        XCTAssertEqual(progress.resumeIndex(in: grown), 2, "resumes at the new photo")
+    }
+
+    func testDeletedAssetsArePrunedFromProgress() {
+        var progress = MonthProgress()
+        progress.markReviewed("a", in: "2026-09")
+        progress.markReviewed("gone", in: "2026-09")
+        progress.markReviewed("gone2", in: "2026-08")
+        XCTAssertTrue(progress.prune(validIDs: ["a", "b"]))
+        XCTAssertTrue(progress.isReviewed("a", in: "2026-09"))
+        XCTAssertFalse(progress.isReviewed("gone", in: "2026-09"))
+        XCTAssertEqual(progress.reviewed["2026-08"], nil, "a month with nothing left is dropped")
+        XCTAssertFalse(progress.prune(validIDs: ["a", "b"]), "second prune is a no-op")
+
+        // A month whose reviewed photo was deleted stays Done if every remaining photo is reviewed.
+        let m = month("2026-09", ["a"])
+        XCTAssertTrue(progress.isDone(m))
+    }
+
+    func testReviewAgainResetsOnlyThatMonth() {
+        var progress = MonthProgress()
+        let sep = month("2026-09", ["a", "b"]), aug = month("2026-08", ["c"])
+        for id in sep.assetIDs { progress.markReviewed(id, in: sep.id) }
+        progress.markReviewed("c", in: aug.id)
+        XCTAssertTrue(progress.isDone(sep))
+        progress.reset(sep.id)
+        XCTAssertFalse(progress.isDone(sep))
+        XCTAssertEqual(progress.resumeIndex(in: sep), 0)
+        XCTAssertTrue(progress.isDone(aug))
+    }
+
+    func testCleanupStoreReviewAgainClearsKeptButLeavesTray() {
+        let monthID = "test-\(UUID().uuidString)"
+        let kept = "\(monthID)-kept", marked = "\(monthID)-marked"
+        let bucket = month(monthID, [kept, marked])
+        let store = CleanupStore()
+        store.keep(kept); store.recordReviewed(kept, inMonth: monthID)
+        store.markForDeletion(marked); store.recordReviewed(marked, inMonth: monthID)
+        XCTAssertTrue(store.monthProgress.isDone(bucket))
+
+        store.resetMonth(bucket)
+        XCTAssertFalse(store.monthProgress.isDone(bucket))
+        XCTAssertFalse(store.kept.contains(kept))
+        XCTAssertTrue(store.isPending(marked), "Review again never empties the review tray")
+
+        store.recordReviewed(kept, inMonth: monthID)
+        store.prune(validIDs: [kept]) // `marked` was deleted elsewhere
+        XCTAssertEqual(store.monthProgress.reviewedCount(in: month(monthID, [kept])), 1)
+        XCTAssertFalse(store.monthProgress.isReviewed(marked, in: monthID))
+        store.resetMonth(bucket); store.clearDecision(marked)
+    }
+
+    // MARK: Pinch-to-zoom on the swipe card
+
+    func testSwipeCommitsAtOneX() {
+        var g = CardGestureState()
+        g.container = CGSize(width: 300, height: 500)
+        g.dragChanged(CGSize(width: 150, height: 0))
+        XCTAssertEqual(g.swipe.width, 150)
+        XCTAssertEqual(g.dragEnded(translation: CGSize(width: 150, height: 0), predictedEnd: CGSize(width: 160, height: 0)), .keep)
+        g.dragChanged(CGSize(width: -40, height: 0))
+        XCTAssertEqual(g.dragEnded(translation: CGSize(width: -40, height: 0), predictedEnd: CGSize(width: -400, height: 0)), .delete)
+        g.dragChanged(CGSize(width: 30, height: 0))
+        XCTAssertNil(g.dragEnded(translation: CGSize(width: 30, height: 0), predictedEnd: CGSize(width: 40, height: 0)))
+    }
+
+    func testZoomedCardPansAndNeverCommits() {
+        var g = CardGestureState()
+        g.container = CGSize(width: 300, height: 500)
+        g.pinchChanged(2.0)
+        XCTAssertTrue(g.isZoomed)
+        XCTAssertFalse(g.canDecide)
+        g.pinchEnded()
+        XCTAssertEqual(g.scale, 2.0, accuracy: 0.0001)
+        XCTAssertTrue(g.wantsHighResolution, "past 1.5x the card asks for a detail image")
+
+        g.dragChanged(CGSize(width: 400, height: 0))
+        XCTAssertEqual(g.dragMode, .pan)
+        XCTAssertEqual(g.swipe, .zero, "the card does not move while zoomed")
+        XCTAssertEqual(g.offset.width, 150, accuracy: 0.0001, "pan is clamped to the overflow")
+        XCTAssertNil(g.dragEnded(translation: CGSize(width: 400, height: 0), predictedEnd: CGSize(width: 900, height: 0)),
+                     "a big horizontal drag while zoomed is a pan, never a keep")
+        XCTAssertNil(g.dragEnded(translation: CGSize(width: -400, height: 0), predictedEnd: CGSize(width: -900, height: 0)))
+    }
+
+    func testPinchBackToOneXRestoresSwiping() {
+        var g = CardGestureState()
+        g.container = CGSize(width: 300, height: 500)
+        g.pinchChanged(3)
+        g.dragChanged(CGSize(width: 200, height: 0)) // drag that started zoomed
+        g.pinchChanged(0.2)                        // pinch all the way out, clamped to 1x
+        XCTAssertEqual(g.scale, 1, accuracy: 0.0001)
+        g.pinchEnded()
+        XCTAssertFalse(g.isZoomed)
+        XCTAssertEqual(g.offset, .zero)
+        XCTAssertNil(g.dragEnded(translation: CGSize(width: 200, height: 0), predictedEnd: CGSize(width: 500, height: 0)),
+                     "the drag that began zoomed still cannot commit")
+        XCTAssertTrue(g.canDecide)
+        g.dragChanged(CGSize(width: 150, height: 0))
+        XCTAssertEqual(g.dragMode, .swipe)
+        XCTAssertEqual(g.dragEnded(translation: CGSize(width: 150, height: 0), predictedEnd: CGSize(width: 150, height: 0)), .keep)
+    }
+
+    func testPinchDuringSwipeBlocksCommit() {
+        var g = CardGestureState()
+        g.dragChanged(CGSize(width: 90, height: 0))
+        g.pinchChanged(1.02)
+        XCTAssertEqual(g.dragMode, .blocked)
+        XCTAssertEqual(g.swipe, .zero)
+        g.pinchEnded() // released below the snap-back scale
+        XCTAssertEqual(g.scale, 1)
+        XCTAssertNil(g.dragEnded(translation: CGSize(width: 200, height: 0), predictedEnd: CGSize(width: 400, height: 0)))
+    }
+
+    func testDoubleTapTogglesAndScaleIsClamped() {
+        var g = CardGestureState()
+        g.container = CGSize(width: 300, height: 500)
+        g.doubleTap()
+        XCTAssertEqual(g.scale, CardGestureState.doubleTapScale)
+        XCTAssertEqual(g.scale, 2.5)
+        XCTAssertFalse(g.canDecide)
+        g.doubleTap()
+        XCTAssertEqual(g.scale, 1)
+        XCTAssertTrue(g.canDecide)
+        g.pinchChanged(10)
+        XCTAssertEqual(g.scale, CardGestureState.maxScale)
+        XCTAssertEqual(g.scale, 4)
+        XCTAssertEqual(CardGestureState.clampScale(.nan), 1)
+        g.pinchEnded()
+        g.reset()
+        XCTAssertEqual(g.scale, 1)
+        XCTAssertEqual(g.container, CGSize(width: 300, height: 500), "reset keeps the measured card size")
+    }
+
     // MARK: Duplicates: slider maps Exact..Loose to 0.05..0.75 and regroups from cached pairs
 
     func testSimilarityThresholdRange() {
