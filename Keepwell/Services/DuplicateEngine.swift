@@ -10,6 +10,39 @@ struct SimilarPair: Sendable {
     let distance: Float
 }
 
+/// Scan progress, observed by DuplicatesView.
+enum DuplicateScanPhase: Equatable, Sendable {
+    case idle
+    case scanning(done: Int, total: Int)
+    case ready
+}
+
+enum DuplicateScanEvent: Sendable {
+    case progress(Int, Int)
+    case finished([SimilarPair], DuplicateScanStats)
+}
+
+/// What a scan did, for diagnostics and the Simulator proof job.
+struct DuplicateScanStats: Sendable {
+    var items = 0
+    var featurePrints = 0
+    var hashes = 0
+    var comparisons = 0
+    var pairs = 0
+    var minDistance: Float = -1
+    /// The eight smallest distances seen, for calibrating the slider mapping.
+    var smallestDistances: [Float] = []
+    /// Which distance drove grouping: Vision feature prints, or the dHash fallback.
+    var source: DuplicateScanner.DistanceSource = .hash
+    /// Vision's distance between two clearly different photos (dHash at least 16 bits apart), if one was found.
+    var probeDistance: Float?
+}
+
+/// Receives the synchronous PHImageManager result without mutating a captured local.
+private final class ImageBox: @unchecked Sendable {
+    var cgImage: CGImage?
+}
+
 /// On-device scan: Vision feature prints compared only within time buckets (photos taken close together).
 enum DuplicateScanner {
     /// Photos further apart than this are never compared.
@@ -17,10 +50,29 @@ enum DuplicateScanner {
     static let maxNeighbors = 40
     /// Pairs above this distance are discarded; the loosest slider setting stays below it.
     static let maxStoredDistance: Float = 0.9
+    /// dHash bits that make two photos "clearly different" for the Vision sanity probe.
+    static let probeMinHashBits = 16
 
-    static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> [SimilarPair] {
+    enum DistanceSource: String, Sendable { case vision, hash }
+
+    /// Below this, Vision is treated as unable to tell two clearly different photos apart. The slider's
+    /// tightest setting is 0.05, so a probe under it would put different scenes into one group.
+    /// Observed on the iOS 26.5 Simulator: 0.0018 for two unrelated generated photos.
+    static let degenerateProbeDistance: Float = 0.05
+
+    /// Vision is trusted unless it rates two clearly different photos as (nearly) identical, which some
+    /// Simulator runtimes do. Without any Vision print the dHash fallback is used; without a clearly
+    /// different pair there is nothing to doubt.
+    static func chooseSource(hasVisionPrints: Bool, probeDistance: Float?) -> DistanceSource {
+        guard hasVisionPrints else { return .hash }
+        guard let probeDistance else { return .vision }
+        return probeDistance < degenerateProbeDistance ? .hash : .vision
+    }
+
+    static func run(items: [AssetInfo], progress: @Sendable (Int, Int) -> Void) -> ([SimilarPair], DuplicateScanStats) {
         let total = items.count
-        guard total > 1 else { return [] }
+        var stats = DuplicateScanStats(items: total)
+        guard total > 1 else { return ([], stats) }
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: items.map(\.id), options: nil)
         var assetByID: [String: PHAsset] = [:]
         for i in 0..<assets.count { let a = assets.object(at: i); assetByID[a.localIdentifier] = a }
@@ -37,25 +89,46 @@ enum DuplicateScanner {
         for (index, item) in items.enumerated() {
             autoreleasepool {
                 guard let asset = assetByID[item.id] else { return }
-                var cgImage: CGImage?
+                let box = ImageBox()
                 manager.requestImage(for: asset, targetSize: CGSize(width: 384, height: 384),
                                      contentMode: .aspectFit, options: options) { image, _ in
-                    cgImage = image?.cgImage
+                    box.cgImage = image?.cgImage
                 }
-                guard let cgImage else { return }
+                guard let cgImage = box.cgImage else { return }
                 hashes[index] = differenceHash(cgImage)
+                if hashes[index] != nil { stats.hashes += 1 }
                 let request = VNGenerateImageFeaturePrintRequest()
                 request.revision = VNGenerateImageFeaturePrintRequestRevision2
                 request.imageCropAndScaleOption = .scaleFill
                 let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
                 if (try? handler.perform([request])) != nil {
                     prints[index] = request.results?.first
+                    if prints[index] != nil { stats.featurePrints += 1 }
                 }
             }
             if index % 10 == 0 || index == total - 1 { progress(index + 1, total) }
         }
 
+        // Sanity probe: Vision distance between the first two photos whose hashes are clearly apart.
+        var probe: Float?
+        // Bounded to the first 200 usable photos so a library of look-alikes cannot make this quadratic.
+        let indexed = Array((0..<total).filter { prints[$0] != nil && hashes[$0] != nil }.prefix(200))
+        probeSearch: for a in indexed {
+            for b in indexed where b > a {
+                if let ha = hashes[a], let hb = hashes[b], (ha ^ hb).nonzeroBitCount >= probeMinHashBits,
+                   let pa = prints[a], let pb = prints[b] {
+                    var d: Float = 0
+                    if (try? pa.computeDistance(&d, to: pb)) != nil { probe = d }
+                    break probeSearch
+                }
+            }
+        }
+        let source = chooseSource(hasVisionPrints: stats.featurePrints > 1, probeDistance: probe)
+        stats.source = source
+        stats.probeDistance = probe
+
         var pairs: [SimilarPair] = []
+        var allDistances: [Float] = []
         for i in 0..<total {
             guard let di = items[i].date else { continue }
             var j = i + 1
@@ -63,13 +136,19 @@ enum DuplicateScanner {
             while j < total, neighbors < maxNeighbors {
                 guard let dj = items[j].date, dj.timeIntervalSince(di) <= bucketWindow else { break }
                 neighbors += 1
-                if let d = distance(prints[i], prints[j], hashes[i], hashes[j]), d <= maxStoredDistance {
-                    pairs.append(SimilarPair(a: i, b: j, distance: d))
+                stats.comparisons += 1
+                if let d = distance(source == .vision ? prints[i] : nil, source == .vision ? prints[j] : nil,
+                                    hashes[i], hashes[j]) {
+                    allDistances.append(d)
+                    if stats.minDistance < 0 || d < stats.minDistance { stats.minDistance = d }
+                    if d <= maxStoredDistance { pairs.append(SimilarPair(a: i, b: j, distance: d)) }
                 }
                 j += 1
             }
         }
-        return pairs
+        stats.pairs = pairs.count
+        stats.smallestDistances = Array(allDistances.sorted().prefix(8))
+        return (pairs, stats)
     }
 
     private static func distance(_ p1: VNFeaturePrintObservation?, _ p2: VNFeaturePrintObservation?,
@@ -78,7 +157,7 @@ enum DuplicateScanner {
             var d: Float = 0
             if (try? p1.computeDistance(&d, to: p2)) != nil { return d }
         }
-        // Fallback when Vision is unavailable (e.g. some Simulator configurations): perceptual hash.
+        // Fallback when Vision is unavailable or untrustworthy (some Simulator runtimes): perceptual hash.
         if let h1, let h2 {
             return Float((h1 ^ h2).nonzeroBitCount) / 64.0 * 2.0
         }
@@ -113,14 +192,11 @@ enum DuplicateScanner {
 @MainActor
 @Observable
 final class DuplicateEngine {
-    enum Phase: Equatable {
-        case idle
-        case scanning(done: Int, total: Int)
-        case ready
-    }
+    typealias Phase = DuplicateScanPhase
 
     private(set) var phase: Phase = .idle
     private(set) var groups: [DuplicateGroup] = []
+    private(set) var lastStats = DuplicateScanStats()
     /// 0 = Exact, 1 = Loose. Regrouping uses cached pairwise distances, no rescan.
     var similarity: Double = 0.35 {
         didSet { if oldValue != similarity { regroup() } }
@@ -131,6 +207,8 @@ final class DuplicateEngine {
     @ObservationIgnored private var items: [AssetInfo] = []
     @ObservationIgnored private var pairs: [SimilarPair] = []
     @ObservationIgnored private var scannedGeneration = -1
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanTaskGeneration = -1
 
     static func threshold(for similarity: Double) -> Float {
         // Exact ≈ 0.05, Loose ≈ 0.75 on Vision revision-2 feature print distance.
@@ -161,35 +239,60 @@ final class DuplicateEngine {
         group.assetIDs.filter { isMarked($0, in: group) }
     }
 
+    /// Whether the library generation still needs a scan (none done yet, or the library changed since).
+    func needsScan(generation: Int) -> Bool { scannedGeneration != generation }
+
+    /// Scans the library's current generation once and waits for it. The scan is owned by the engine,
+    /// not by the calling view task, so a cancelled view task never leaves a half-finished result behind.
     func scanIfNeeded(library: PhotoLibrary) async {
-        guard scannedGeneration != library.generation else { return }
-        if case .scanning = phase { return }
-        await scan(library: library)
+        let generation = library.generation
+        guard needsScan(generation: generation) else { return }
+        if scanTask == nil || scanTaskGeneration != generation {
+            scanTask?.cancel()
+            scanTaskGeneration = generation
+            let snapshot = library.imagesOldestFirst
+            scanTask = Task { [weak self] in await self?.scan(snapshot: snapshot, generation: generation) }
+        }
+        await scanTask?.value
     }
 
-    func scan(library: PhotoLibrary) async {
-        let snapshot = library.imagesOldestFirst
-        let generation = library.generation
-        items = snapshot
+    private func scan(snapshot: [AssetInfo], generation: Int) async {
         phase = .scanning(done: 0, total: snapshot.count)
-        let stream = AsyncStream<ScanEvent> { continuation in
+        let stream = AsyncStream<DuplicateScanEvent> { continuation in
             Task.detached(priority: .userInitiated) {
-                let result = DuplicateScanner.run(items: snapshot) { done, total in
+                let (result, stats) = DuplicateScanner.run(items: snapshot) { done, total in
                     continuation.yield(.progress(done, total))
                 }
-                continuation.yield(.finished(result))
+                continuation.yield(.finished(result, stats))
                 continuation.finish()
             }
         }
+        var outcome: ([SimilarPair], DuplicateScanStats)?
         for await event in stream {
             switch event {
             case .progress(let done, let total):
-                phase = .scanning(done: done, total: total)
-            case .finished(let result):
-                pairs = result
+                if scanTaskGeneration == generation { phase = .scanning(done: done, total: total) }
+            case .finished(let result, let stats):
+                outcome = (result, stats)
             }
         }
+        // Superseded by a newer generation, or cancelled: keep the previous result untouched.
+        guard let outcome, scanTaskGeneration == generation, !Task.isCancelled else { return }
+        // Items and pairs are swapped together: pair indices always refer to the current items.
+        items = snapshot
+        pairs = outcome.0
+        lastStats = outcome.1
         scannedGeneration = generation
+        scanTask = nil
+        overrides = [:]
+        regroup()
+        phase = .ready
+    }
+
+    /// Seeds the cached scan result directly (unit tests and previews). Regroups immediately.
+    func loadCached(items: [AssetInfo], pairs: [SimilarPair]) {
+        self.items = items
+        self.pairs = pairs
         overrides = [:]
         regroup()
         phase = .ready
@@ -226,10 +329,5 @@ final class DuplicateEngine {
         if info.isScreenshot { s -= 5 }
         s += (info.date?.timeIntervalSince1970 ?? 0) / 1e12
         return s
-    }
-
-    private enum ScanEvent: Sendable {
-        case progress(Int, Int)
-        case finished([SimilarPair])
     }
 }

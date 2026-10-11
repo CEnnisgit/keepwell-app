@@ -34,7 +34,21 @@ struct DuplicatesView: View {
             }
         }
         .task(id: library.generation) {
+            #if DEBUG
+            if engine.needsScan(generation: library.generation) { KWDebugState.set(["dupPhase": "scanning"]) }
+            #endif
             await engine.scanIfNeeded(library: library)
+            #if DEBUG
+            let stats = engine.lastStats
+            KWDebugState.set(["dupPhase": engine.phase == .ready ? "ready" : "scanning",
+                              "dupGroups": engine.groups.count, "dupMarked": engine.markedCount,
+                              "dupItems": stats.items, "dupFeaturePrints": stats.featurePrints, "dupHashes": stats.hashes,
+                              "dupComparisons": stats.comparisons, "dupPairs": stats.pairs,
+                              "dupMinDistance": Double(stats.minDistance),
+                              "dupSmallest": stats.smallestDistances.map { String(format: "%.3f", $0) }.joined(separator: " "),
+                              "dupSource": stats.source.rawValue,
+                              "dupProbeDistance": stats.probeDistance.map { Double($0) } ?? -1])
+            #endif
         }
     }
 

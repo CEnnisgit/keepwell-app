@@ -48,13 +48,32 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: YES
+  KeepwellTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: KeepwellTests
+    dependencies:
+      - target: Keepwell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nimbuswebdesign.keepwell.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: complete
+        CODE_SIGN_STYLE: Automatic
 schemes:
   Keepwell:
     build:
       targets:
         Keepwell: all
+        KeepwellTests: [test]
     run:
       config: Debug
       storeKitConfiguration: Keepwell.storekit
+    test:
+      config: Debug
+      targets:
+        - KeepwellTests
     archive:
       config: Release

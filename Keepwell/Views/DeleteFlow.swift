@@ -14,7 +14,7 @@ struct DeleteFlowModifier: ViewModifier {
                 DeleteExplainerView(
                     onContinue: { cleanup.explainerAccepted(isPro: store.isPro) },
                     onCancel: { cleanup.cancelRequest() })
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.large])
             }
             .sheet(item: $cleanup.summary) { summary in
                 FreedSummaryView(summary: summary)
@@ -59,13 +59,16 @@ struct DeleteExplainerView: View {
             Text("Deleted photos go to Recently Deleted for 30 days")
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Deleted photos stay in Recently Deleted for 30 days. To recover one, open Photos › Albums › Recently Deleted. Keepwell's Undo button only reverses swipes before you confirm a delete.")
                 .foregroundStyle(Color.kwTextSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Text("iOS will ask you to confirm each batch. Keepwell never deletes anything without that confirmation.")
                 .font(.footnote)
                 .foregroundStyle(Color.kwTextSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button("Got it, continue", action: onContinue)
                 .buttonStyle(PrimaryButtonStyle())

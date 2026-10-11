@@ -34,7 +34,19 @@ To test purchases against `Keepwell.storekit`, open `Keepwell.xcodeproj` in Xcod
 
 ### Screenshot hooks (DEBUG builds only)
 `xcrun simctl launch $UDID com.nimbuswebdesign.keepwell -KWScreen <screen>`, where `<screen>` is one of
-`month`, `onthisday`, `screenshots`, `duplicates`, `tray`, `explainer`, `freed`, `paywall` or `settings`. `freed` shows the real summary screen for the newest month's first 9 items **without deleting anything**.
+`home`, `swipe`, `month`, `onthisday`, `screenshots`, `duplicates`, `tray`, `explainer`, `freed`, `paywall` or `settings`.
+`swipe` opens the newest month with the top card held mid-swipe so the Keep stamp shows. `tray` marks the newest month's first 6 items.
+`freed` shows the real summary screen for the newest month's first 9 items **without deleting anything**.
+
+## Tests and CI proof
+`KeepwellTests` (XCTest, runs in the Simulator) covers the pure logic: month / On this day bucketing, swipe decisions and pruning,
+the midnight quota reset, the How-similar threshold and live regrouping, keep-best order, the dHash fallback, product IDs and locked prices.
+```bash
+xcodebuild test -scheme Keepwell -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' CODE_SIGNING_ALLOWED=NO
+```
+`.github/workflows/sim-proof.yml` (branch `feat/sim-build` or manual) builds, tests, seeds a generated photo library
+(`scripts/sim/gen-media.swift`), drives every hook above and uploads `build.log`, `test.log`, `device.txt`, `sizes.txt` and the
+1320x2868 screenshots as the `keepwell-proof` artifact. `docs/SPEC-CHECKLIST.md` maps each SPEC.md requirement to code and proof.
 
 ## Behaviour notes
 - Sessions: by month, On this day, and Screenshots (the built-in `.smartAlbumScreenshots` album).
@@ -42,6 +54,6 @@ To test purchases against `Keepwell.storekit`, open `Keepwell.xcodeproj` in Xcod
 - A one-time explainer appears before the first delete. After each batch, a "See exactly what you freed" summary shows thumbnails, the item count and the bytes freed.
 - Free plan: unlimited swiping and keeping, plus 50 deletions per local day. The count is stored together with `Calendar.current.startOfDay` and resets at local midnight. Pro removes the cap.
 - The space-freed total is the sum of `PHAssetResource` file sizes, stored in UserDefaults/`@AppStorage` (`totalFreedBytes`).
-- Duplicates: Vision `VNGenerateImageFeaturePrintRequest` (revision 2) runs on photos taken within 15 minutes of each other. Pairwise distances are cached, so the How-similar slider (Exact to Loose, distance 0.05 to 0.75) regroups live without a rescan. When Vision fails (for example in some Simulator configurations), a 64-bit dHash is used as the fallback. Keep-best order: favorite first, then highest resolution, then most recent.
+- Duplicates: Vision `VNGenerateImageFeaturePrintRequest` (revision 2) runs on photos taken within 15 minutes of each other. Pairwise distances are cached, so the How-similar slider (Exact to Loose, distance 0.05 to 0.75) regroups live without a rescan. A 64-bit dHash is the fallback when Vision fails, and also when Vision puts two clearly different photos (16 or more dHash bits apart) closer than 0.05, the tightest slider setting. The iOS 26.5 Simulator does this: it rated two unrelated photos 0.0018 apart. Keep-best order: favorite first, then highest resolution, then most recent.
 - Limited access: a banner plus Settings both offer **Manage selection**, which opens `presentLimitedLibraryPicker`. The automatic limited-access prompt is suppressed. Denied access shows a screen that links to iOS Settings.
 - No network calls, analytics, crash reporting or ad SDKs. No third-party dependencies.
