@@ -22,7 +22,7 @@ if s.get("ready") is not True:
     print(f"WAIT {hook}: hook not finished"); sys.exit(2)
 if hook == "duplicates" and s.get("dupPhase") != "ready":
     print(f"WAIT {hook}: duplicate scan {s.get('dupPhase')!r}"); sys.exit(2)
-if hook == "zoom" and not s.get("zoomScale"):
+if hook in ("zoom", "zoomdim") and not s.get("zoomScale"):
     print(f"WAIT {hook}: card not zoomed yet"); sys.exit(2)
 if mode == "ready":
     print(f"READY {hook}"); sys.exit(0)
@@ -44,6 +44,9 @@ checks = {
                "months needs the month list with at least one Done and one partially reviewed month"),
     "zoom": ("session(" in p and "month" in p and 2.4 <= float(s.get("zoomScale", 0)) <= 2.6
              and s.get("zoomBlocksDecide") is True, "zoom needs the month card at about 2.5x with keep/delete blocked"),
+    "zoomdim": ("session(" in p and "month" in p and 2.4 <= float(s.get("zoomScale", 0)) <= 2.6
+                and s.get("zoomBlocksDecide") is True and s.get("keepDeleteDimmed") is True,
+                "zoomdim needs the month card at about 2.5x with keep/delete blocked and dimmed"),
 }
 if s.get("assets", 0) <= 0:
     fail("library is empty")
@@ -53,4 +56,5 @@ if not ok:
 print(f"OK {hook}: assets={s.get('assets')} months={s.get('months')} onThisDay={s.get('onThisDay')} "
       f"screenshots={s.get('screenshots')} dupGroups={s.get('dupGroups')} pending={s.get('pending')} path={p!r} "
       f"monthsDone={s.get('monthsDone')} monthsPartial={s.get('monthsPartial')} zoomScale={s.get('zoomScale')} "
+      f"keepDeleteDimmed={s.get('keepDeleteDimmed')} "
       f"detailPixelWidth={s.get('detailPixelWidth')}")

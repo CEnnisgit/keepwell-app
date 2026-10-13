@@ -17,6 +17,8 @@ struct SwipeSessionView: View {
     private var current: String? { index < queue.count ? queue[index] : nil }
     private var allIDs: [String] { library.ids(for: session) }
     private var drag: CGSize { gesture.swipe }
+    /// Keep and Delete are off while there is no card or the card is zoomed; the round button style dims them.
+    private var decideDisabled: Bool { current == nil || !gesture.canDecide }
     /// Month sessions walk the whole month and skip what was already swiped, so the header reads
     /// "121 of 340" and the month resumes at its first unreviewed photo.
     private var monthID: String? {
@@ -82,11 +84,12 @@ struct SwipeSessionView: View {
         case "swipe":
             // Screenshot hook: hold the top card mid-swipe so the Keep stamp and rotation are visible.
             gesture.debugHoldSwipe(CGSize(width: 84, height: -12))
-        case "zoom":
-            // Screenshot hook: the top card double-tapped to 2.5x, which also requests the detail image.
+        case "zoom", "zoomdim":
+            // Screenshot hooks: the top card double-tapped to 2.5x, which also requests the detail image.
+            // `zoomdim` captures the same state to show the dimmed Keep and Delete buttons below the card.
             gesture.doubleTap()
             KWDebugState.set(["zoomScale": Double(gesture.scale), "zoomBlocksDecide": !gesture.canDecide,
-                              "zoomCurrent": current ?? ""])
+                              "keepDeleteDimmed": decideDisabled, "zoomCurrent": current ?? ""])
         default:
             break
         }
@@ -260,26 +263,27 @@ struct SwipeSessionView: View {
 
     private var controls: some View {
         HStack(spacing: 28) {
-            roundButton("xmark", color: .kwDelete, label: "Mark for deletion") { decide(.delete) }
-                .disabled(current == nil || !gesture.canDecide)
+            roundButton("xmark", color: .kwDelete, label: "Mark for deletion", hint: zoomHint) { decide(.delete) }
+                .disabled(decideDisabled)
             roundButton("arrow.uturn.backward", color: .kwTextSecondary, label: "Undo", small: true) { undo() }
                 .disabled(history.isEmpty)
-            roundButton("heart.fill", color: .kwKeep, label: "Keep") { decide(.keep) }
-                .disabled(current == nil || !gesture.canDecide)
+            roundButton("heart.fill", color: .kwKeep, label: "Keep", hint: zoomHint) { decide(.keep) }
+                .disabled(decideDisabled)
         }
     }
 
-    private func roundButton(_ icon: String, color: Color, label: String, small: Bool = false,
+    private var zoomHint: String { gesture.isZoomed ? "Zoom out to decide" : "" }
+
+    private func roundButton(_ icon: String, color: Color, label: String, small: Bool = false, hint: String = "",
                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: small ? 20 : 26, weight: .bold))
                 .foregroundStyle(color)
-                .frame(width: small ? 52 : 68, height: small ? 52 : 68)
-                .background(Color.kwSurface, in: Circle())
-                .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
         }
+        .buttonStyle(RoundButtonStyle(diameter: small ? 52 : 68))
         .accessibilityLabel(label)
+        .accessibilityHint(hint)
     }
 
     private var doneView: some View {
@@ -318,5 +322,31 @@ struct SwipeSessionView: View {
             }
         }
         .padding()
+    }
+}
+
+/// Circular control for the swipe screen. Reads `isEnabled`, so any disabled round button (Keep and Delete
+/// while zoomed, Undo with nothing to undo) dims the same way; VoiceOver reads it as dimmed via `.disabled`.
+private struct RoundButtonStyle: ButtonStyle {
+    let diameter: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        RoundButtonBody(configuration: configuration, diameter: diameter)
+    }
+
+    private struct RoundButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        let diameter: CGFloat
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .frame(width: diameter, height: diameter)
+                .background(Color.kwSurface, in: Circle())
+                .shadow(color: .black.opacity(isEnabled ? 0.08 : 0), radius: 6, y: 3)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.35)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isEnabled)
+        }
     }
 }

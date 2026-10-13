@@ -301,6 +301,11 @@ final class KeepwellTests: XCTestCase {
         g.pinchEnded()
         g.reset()
         XCTAssertEqual(g.scale, 1)
+        g.doubleTap()
+        XCTAssertFalse(g.canDecide, "zoomed: Keep and Delete are disabled and dimmed")
+        g.reset()
+        XCTAssertTrue(g.canDecide, "reset (next card) re-enables Keep and Delete")
+        XCTAssertFalse(g.isZoomed)
         XCTAssertEqual(g.container, CGSize(width: 300, height: 500), "reset keeps the measured card size")
     }
 

@@ -2,11 +2,11 @@ name: sim-proof
 
 # Builds Keepwell for the iOS Simulator (no signing), runs the unit tests, seeds a small photo
 # library, drives every DEBUG screenshot hook and uploads the evidence as the `keepwell-proof` artifact.
-# Private repo on free macOS minutes (10x): runs only on feat/sim-build and feat/month-progress-zoom pushes or by hand.
+# Private repo on free macOS minutes (10x): runs only on feat/sim-build, feat/month-progress-zoom and fix/zoom-dim pushes or by hand.
 
 on:
   push:
-    branches: [feat/sim-build, feat/month-progress-zoom]
+    branches: [feat/sim-build, feat/month-progress-zoom, fix/zoom-dim]
   workflow_dispatch:
 
 permissions:
@@ -118,7 +118,7 @@ jobs:
             if [ "$w" != "1320" ] || [ "$h" != "2868" ]; then fail=1; fi
           done
           echo "count: $count" | tee -a proof/sizes.txt
-          test "$count" -eq 13
+          test "$count" -eq 14
           test "$fail" -eq 0
 
       - name: Diagnostics (on failure)
