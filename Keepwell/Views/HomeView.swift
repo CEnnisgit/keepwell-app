@@ -192,7 +192,7 @@ struct HomeView: View {
     }
 
     // MARK: Debug launch hooks for Simulator screenshots:
-    // -KWScreen home|swipe|month|onthisday|screenshots|duplicates|tray|explainer|freed|paywall|settings|months|zoom
+    // -KWScreen home|swipe|month|onthisday|screenshots|duplicates|tray|explainer|freed|paywall|settings|months|zoom|zoomdim
     private func runDebugLaunchIfNeeded() async {
         #if DEBUG
         guard !didRunDebugLaunch, let screen = UserDefaults.standard.string(forKey: "KWScreen") else { return }
@@ -200,7 +200,7 @@ struct HomeView: View {
         switch screen {
         case "home": break
         case "paywall": cleanup.showPaywall = true
-        case "month", "swipe", "zoom": if let m = library.months.first { path = [.session(.month(m.id))] }
+        case "month", "swipe", "zoom", "zoomdim": if let m = library.months.first { path = [.session(.month(m.id))] }
         case "months":
             // Newest month half swiped, the next one fully swiped (Done). Writes real saved progress.
             if let first = library.months.first {

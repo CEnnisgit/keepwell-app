@@ -5,8 +5,8 @@
 set -euo pipefail
 UDID="$1"; OUT="$2"; STATE="$3"
 BUNDLE="com.nimbuswebdesign.keepwell"
-# months and zoom run last: the months hook writes saved month progress that later launches would see.
-HOOKS=(home swipe month onthisday screenshots duplicates tray explainer freed paywall settings months zoom)
+# months, zoom and zoomdim run last: the months hook writes saved month progress that later launches would see.
+HOOKS=(home swipe month onthisday screenshots duplicates tray explainer freed paywall settings months zoom zoomdim)
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT" "$STATE"
 TMP=$(mktemp -d)
