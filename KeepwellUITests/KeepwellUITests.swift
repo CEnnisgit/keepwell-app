@@ -24,7 +24,7 @@ final class KeepwellUITests: XCTestCase {
     @discardableResult
     private func tapSystemButton(_ labels: [String], app: XCUIApplication, timeout: TimeInterval = 15) -> String? {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let sources = [springboard, app] + Self.systemUIBundles.map { XCUIApplication(bundleIdentifier: $0) }
+        let sources = [springboard, app]
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             for (i, source) in sources.enumerated() {
@@ -32,7 +32,7 @@ final class KeepwellUITests: XCTestCase {
                     let button = source.alerts.buttons[label]
                     if button.exists { button.tap(); return label }
                     if i != 1 {  // outside the app, any hittable button with that label is the system one
-                        let any = source.buttons[label]
+                        let any = source.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label + " ")).firstMatch
                         if any.exists, any.isHittable { any.tap(); return label }
                     }
                 }
@@ -50,8 +50,6 @@ final class KeepwellUITests: XCTestCase {
         }
         return nil
     }
-
-    private static let systemUIBundles = ["com.apple.PhotosViewService", "com.apple.mobileslideshow", "com.apple.photos.service"]
 
     private func leadingInt(_ s: String) -> Int? {
         Int(s.prefix(while: { $0.isNumber }))
@@ -125,7 +123,7 @@ final class KeepwellUITests: XCTestCase {
         let gotIt = app.buttons["Got it, continue"]
         if gotIt.waitForExistence(timeout: 8) { gotIt.tap() }
 
-        XCTAssertNotNil(tapSystemButton(["Delete", "Allow", "Delete Photos"], app: app, timeout: 40), "no iOS delete confirmation")
+        XCTAssertNotNil(tapSystemButton(["Delete"], app: app, timeout: 40), "no iOS delete confirmation")
 
         let freed = app.staticTexts["kw.freedBytes"]
         XCTAssertTrue(freed.waitForExistence(timeout: 30), "freed summary did not appear")

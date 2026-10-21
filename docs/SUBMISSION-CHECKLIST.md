@@ -27,4 +27,5 @@ Apple Developer Program membership and App Store Connect, which nobody has yet (
 | 19 | UI tests | Denied access, real batch delete via iOS alert | Ready | `KeepwellUITests`; `proof/ui-test.log`. |
 | 20 | Limited access UI test | — | Not automated (documented) | `simctl privacy` only has grant/revoke/reset (`proof/simctl-privacy-help.txt`); there is no limited state, and the limited picker is an out-of-process system sheet. Check by hand on a device: choose "Limit Access…", confirm the Limited banner and Manage selection. |
 | 21 | Signing, TestFlight, upload | — | Needs Apple account | Out of scope for this repo work. |
-| 22 | Seller / Paid Apps agreement, tax, banking | — | Needs Owner | See LAUNCH-STEPS (entity choice, $99 enrollment). |
+| 22 | Seller / Paid Apps agreement, tax, banking | — | Needs Owner | Brand, bundle ID and URLs may change before the first upload. |
+| 23 | Brand, bundle ID and URLs | `com.nimbuswebdesign.keepwell`, nimbuswebdesign.com URLs, `apps@nimbuswebdesign.com` | Needs Owner | Brand, bundle ID and URLs may change before the first upload. Kept as-is for now. The bundle ID (and IAP product IDs) are locked once a build is uploaded, so decide before the first upload; changing them means editing `project.yml`, `Keepwell.storekit`, `StoreManager.swift`, `Theme.swift` URLs and the tests. |
