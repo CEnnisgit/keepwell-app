@@ -184,10 +184,7 @@ final class CleanupStore {
         }
 
         do {
-            try await PHPhotoLibrary.shared().performChanges {
-                let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-                PHAssetChangeRequest.deleteAssets(assets)
-            }
+            try await PHPhotoLibrary.shared().performChanges(Self.deleteChangeBlock(ids))
         } catch {
             if let photosError = error as? PHPhotosError, photosError.code == .userCancelled { return }
             errorMessage = "Couldn't delete: \(error.localizedDescription)"
@@ -218,6 +215,16 @@ final class CleanupStore {
         saveState()
 
         summary = FreedSummary(count: deleted.count, bytes: bytes, thumbnails: thumbs, date: .now)
+    }
+
+    /// PhotoKit runs the change block on its own queue. Built outside the main actor so Swift 6 doesn't
+    /// infer @MainActor isolation for it, which traps at runtime ("Block was expected to execute on queue
+    /// com.apple.main-thread") the moment the user confirms a delete.
+    nonisolated static func deleteChangeBlock(_ ids: [String]) -> @Sendable () -> Void {
+        return {
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+            PHAssetChangeRequest.deleteAssets(assets)
+        }
     }
 
     #if DEBUG
