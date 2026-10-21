@@ -29,5 +29,5 @@ There is no weekly plan, no countdown, and no fake urgency. The paywall always s
 4. Open "Duplicates & similar" and move the "How similar" slider to watch the groups update.
 5. Tap "Go Pro" (top left) or Settings › Upgrade to see the paywall. Sandbox purchases work with any sandbox account.
 
-Privacy Policy: https://nimbuswebdesign.com/apps/keepwell/privacy/
-Support: https://nimbuswebdesign.com/apps/keepwell/support/
+Privacy Policy: https://cennisgit.github.io/app-pages/apps/keepwell/privacy/
+Support: https://cennisgit.github.io/app-pages/apps/keepwell/support/
