@@ -24,20 +24,34 @@ final class KeepwellUITests: XCTestCase {
     @discardableResult
     private func tapSystemButton(_ labels: [String], app: XCUIApplication, timeout: TimeInterval = 15) -> String? {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let sources = [springboard, app] + Self.systemUIBundles.map { XCUIApplication(bundleIdentifier: $0) }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            for source in [springboard, app] {
+            for (i, source) in sources.enumerated() {
                 for label in labels {
                     let button = source.alerts.buttons[label]
                     if button.exists { button.tap(); return label }
-                    let any = source.buttons[label]
-                    if source === springboard, any.exists, any.isHittable { any.tap(); return label }
+                    if i != 1 {  // outside the app, any hittable button with that label is the system one
+                        let any = source.buttons[label]
+                        if any.exists, any.isHittable { any.tap(); return label }
+                    }
                 }
             }
             Thread.sleep(forTimeInterval: 0.5)
         }
+        // Diagnostics: what was on screen and in the accessibility trees.
+        shot("diag-\(labels.first ?? "alert")")
+        for (i, source) in sources.prefix(2).enumerated() {
+            let a = XCTAttachment(string: source.debugDescription)
+            a.name = "tree-\(i)"; a.lifetime = .keepAlways; add(a)
+            if let dir = ProcessInfo.processInfo.environment["KW_UI_SHOTS"] {
+                try? source.debugDescription.write(toFile: dir + "/tree-\(i).txt", atomically: true, encoding: .utf8)
+            }
+        }
         return nil
     }
+
+    private static let systemUIBundles = ["com.apple.PhotosViewService", "com.apple.mobileslideshow", "com.apple.photos.service"]
 
     private func leadingInt(_ s: String) -> Int? {
         Int(s.prefix(while: { $0.isNumber }))
@@ -111,7 +125,7 @@ final class KeepwellUITests: XCTestCase {
         let gotIt = app.buttons["Got it, continue"]
         if gotIt.waitForExistence(timeout: 8) { gotIt.tap() }
 
-        XCTAssertNotNil(tapSystemButton(["Delete"], app: app, timeout: 20), "no iOS delete confirmation")
+        XCTAssertNotNil(tapSystemButton(["Delete", "Allow", "Delete Photos"], app: app, timeout: 40), "no iOS delete confirmation")
 
         let freed = app.staticTexts["kw.freedBytes"]
         XCTAssertTrue(freed.waitForExistence(timeout: 30), "freed summary did not appear")
