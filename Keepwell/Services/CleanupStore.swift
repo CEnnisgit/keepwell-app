@@ -228,7 +228,15 @@ final class CleanupStore {
         for id in ids {
             if let image = await ImageLoader.image(for: id, size: CGSize(width: 240, height: 240)) { thumbs.append(image) }
         }
-        summary = FreedSummary(count: ids.count, bytes: sizes.values.reduce(0, +), thumbnails: thumbs, date: .now)
+        let bytes = sizes.values.reduce(0, +)
+        // Stage a consistent running total: a plausible earlier total plus this batch, so the summary's
+        // "Total freed" row and the home SPACE FREED card agree with the batch shown. DEBUG only.
+        let priorBytes = 1_240_000_000, priorCount = 186
+        totalFreedBytes = priorBytes + Int(bytes)
+        totalDeletedCount = priorCount + ids.count
+        defaults.set(totalFreedBytes, forKey: Keys.totalFreedBytes)
+        defaults.set(totalDeletedCount, forKey: Keys.totalDeletedCount)
+        summary = FreedSummary(count: ids.count, bytes: bytes, thumbnails: thumbs, date: .now)
     }
     #endif
 

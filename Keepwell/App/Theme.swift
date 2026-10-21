@@ -75,5 +75,6 @@ struct IconChip: View {
             .foregroundStyle(Color.kwBrandTeal)
             .frame(width: 34, height: 34)
             .background(Color.kwBrandTint, in: RoundedRectangle(cornerRadius: KWRadius.chip, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
