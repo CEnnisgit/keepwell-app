@@ -439,8 +439,8 @@ final class KeepwellTests: XCTestCase {
     // MARK: Links and copy
 
     func testLinksAndFormatting() {
-        XCTAssertEqual(KWLinks.privacy.absoluteString, "https://nimbuswebdesign.com/apps/keepwell/privacy/")
-        XCTAssertEqual(KWLinks.support.absoluteString, "https://nimbuswebdesign.com/apps/keepwell/support/")
+        XCTAssertEqual(KWLinks.privacy.absoluteString, "https://cennisgit.github.io/app-pages/apps/keepwell/privacy/")
+        XCTAssertEqual(KWLinks.support.absoluteString, "https://cennisgit.github.io/app-pages/apps/keepwell/support/")
         XCTAssertEqual(KWLinks.terms.absoluteString, "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
         XCTAssertFalse(formatBytes(0).isEmpty)
         XCTAssertTrue(formatBytes(1_500_000).contains("MB"))

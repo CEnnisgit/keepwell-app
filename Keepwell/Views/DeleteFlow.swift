@@ -56,11 +56,12 @@ struct DeleteExplainerView: View {
                 .font(.system(size: 52))
                 .foregroundStyle(Color.kwBrandTeal)
                 .padding(.top, 28)
-            Text("Deleted photos go to Recently Deleted for 30 days")
+                .accessibilityHidden(true)
+            Text("Deleted photos stay in Recently Deleted for 30 days")
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Deleted photos stay in Recently Deleted for 30 days. To recover one, open Photos › Albums › Recently Deleted. Keepwell's Undo button only reverses swipes before you confirm a delete.")
+            Text("To recover one, open Photos › Albums › Recently Deleted. Keepwell's Undo button only reverses swipes before you confirm a delete.")
                 .foregroundStyle(Color.kwTextSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -103,6 +104,7 @@ struct FreedSummaryView: View {
                             .font(.system(size: 52, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(Color.kwBrandTeal)
+                            .accessibilityIdentifier("kw.freedBytes")
                         Text("\(summary.count) \(summary.count == 1 ? "item" : "items") moved to Recently Deleted")
                             .font(.headline)
                     }
@@ -114,6 +116,7 @@ struct FreedSummaryView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: KWRadius.thumb, style: .continuous))
                         }
                     }
+                    .accessibilityHidden(true)
                     if summary.count > summary.thumbnails.count {
                         Text("+ \(summary.count - summary.thumbnails.count) more")
                             .font(.footnote).foregroundStyle(Color.kwTextSecondary)

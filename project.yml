@@ -32,7 +32,7 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        NSPhotoLibraryUsageDescription: "Keepwell shows your photos and videos so you can choose what to keep and what to delete. Photos you delete go to Recently Deleted for 30 days. Everything stays on your iPhone and nothing is uploaded."
+        NSPhotoLibraryUsageDescription: "Keepwell shows your photos and videos so you can choose what to keep and what to delete. Deleted photos stay in Recently Deleted for 30 days. Everything stays on your iPhone and nothing is uploaded."
         PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
         ITSAppUsesNonExemptEncryption: false
     settings:
@@ -62,12 +62,28 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_STRICT_CONCURRENCY: complete
         CODE_SIGN_STYLE: Automatic
+  KeepwellUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: KeepwellUITests
+    dependencies:
+      - target: Keepwell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nimbuswebdesign.keepwell.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: complete
+        CODE_SIGN_STYLE: Automatic
+        TEST_TARGET_NAME: Keepwell
 schemes:
   Keepwell:
     build:
       targets:
         Keepwell: all
         KeepwellTests: [test]
+        KeepwellUITests: [test]
     run:
       config: Debug
       storeKitConfiguration: Keepwell.storekit
@@ -75,5 +91,6 @@ schemes:
       config: Debug
       targets:
         - KeepwellTests
+        - KeepwellUITests
     archive:
       config: Release

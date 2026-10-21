@@ -31,8 +31,8 @@ enum KWLayout {
 }
 
 enum KWLinks {
-    static let privacy = URL(string: "https://nimbuswebdesign.com/apps/keepwell/privacy/")!
-    static let support = URL(string: "https://nimbuswebdesign.com/apps/keepwell/support/")!
+    static let privacy = URL(string: "https://cennisgit.github.io/app-pages/apps/keepwell/privacy/")!
+    static let support = URL(string: "https://cennisgit.github.io/app-pages/apps/keepwell/support/")!
     /// Apple's standard EULA, used as the Terms of Use for subscriptions.
     static let terms = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
 }
@@ -75,5 +75,6 @@ struct IconChip: View {
             .foregroundStyle(Color.kwBrandTeal)
             .frame(width: 34, height: 34)
             .background(Color.kwBrandTint, in: RoundedRectangle(cornerRadius: KWRadius.chip, style: .continuous))
+            .accessibilityHidden(true)
     }
 }

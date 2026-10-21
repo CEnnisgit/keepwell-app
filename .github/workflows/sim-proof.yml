@@ -2,11 +2,13 @@ name: sim-proof
 
 # Builds Keepwell for the iOS Simulator (no signing), runs the unit tests, seeds a small photo
 # library, drives every DEBUG screenshot hook and uploads the evidence as the `keepwell-proof` artifact.
-# Private repo on free macOS minutes (10x): runs only on feat/sim-build, feat/month-progress-zoom and fix/zoom-dim pushes or by hand.
+# Also builds Release for the Simulator and fails if DEBUG-only code (stand-in prices, -KWScreen hooks,
+# debug state) is in the Release app, then runs the KeepwellUITests XCUITests (denied access, real batch delete).
+# Private repo on free macOS minutes (10x): runs only on the listed branch pushes or by hand.
 
 on:
   push:
-    branches: [feat/sim-build, feat/month-progress-zoom, fix/zoom-dim]
+    branches: [feat/sim-build, feat/month-progress-zoom, fix/zoom-dim, chore/submission-ready]
   workflow_dispatch:
 
 permissions:
@@ -66,6 +68,26 @@ jobs:
           test "$ERRORS" -eq 0
           test -d "$DERIVED/Build/Products/Debug-iphonesimulator/Keepwell.app"
 
+      - name: Build Release (Simulator, no signing) and scan for DEBUG-only code
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Keepwell.xcodeproj -scheme Keepwell -configuration Release \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee proof/build-release.log
+          grep -q '\*\* BUILD SUCCEEDED \*\*' proof/build-release.log
+          test "$(grep -c 'error:' proof/build-release.log || true)" -eq 0
+          cat proof/build.log proof/build-release.log | grep -E '^/.*: warning: ' | sort -u > proof/warnings.txt || true
+          echo "unique compiler warnings (Debug + Release): $(wc -l < proof/warnings.txt)"
+          cat proof/warnings.txt
+          scripts/sim/debug-leak-scan.sh "$DERIVED/Build/Products/Debug-iphonesimulator/Keepwell.app" proof/debug-scan-control.txt expect-some
+          scripts/sim/debug-leak-scan.sh "$DERIVED/Build/Products/Release-iphonesimulator/Keepwell.app" proof/debug-scan-release.txt expect-none
+          /usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$DERIVED/Build/Products/Release-iphonesimulator/Keepwell.app/Info.plist" | tee proof/release-encryption-key.txt
+          grep -qx false proof/release-encryption-key.txt
+
       - name: Unit tests
         shell: bash
         run: |
@@ -73,7 +95,7 @@ jobs:
           xcodebuild test \
             -project Keepwell.xcodeproj -scheme Keepwell -configuration Debug \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
-            -derivedDataPath "$DERIVED" \
+            -derivedDataPath "$DERIVED" -only-testing:KeepwellTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee proof/test.log
           grep -q '\*\* TEST SUCCEEDED \*\*' proof/test.log
@@ -105,6 +127,39 @@ jobs:
             --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
           scripts/sim/capture.sh "$UDID" proof/screens proof/state
 
+      - name: UI tests (XCUITest, real system alerts)
+        shell: bash
+        run: |
+          set -o pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          # Fresh app data (no tray or progress from the hooks), then revoke Photos for the denied-access test.
+          xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+          xcrun simctl uninstall "$UDID" "$BUNDLE_ID" || true
+          xcrun simctl privacy "$UDID" revoke photos "$BUNDLE_ID" 2>&1 | tee proof/ui-revoke.log || true
+          # Limited access cannot be set from simctl (privacy grant/revoke/reset only): see docs/SUBMISSION-CHECKLIST.md.
+          xcrun simctl help privacy > proof/simctl-privacy-help.txt 2>&1 || true
+          mkdir -p proof/ui-shots
+          rc=0
+          export TEST_RUNNER_KW_UI_SHOTS="$PWD/proof/ui-shots"
+          xcodebuild test \
+            -project Keepwell.xcodeproj -scheme Keepwell -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" -only-testing:KeepwellUITests \
+            -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee proof/ui-test.log || rc=$?
+          if [ -z "$(ls proof/ui-shots/*.png 2>/dev/null)" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui.xcresult" --output-path proof/ui-shots >/dev/null 2>&1 || true
+          fi
+          ls -la proof/ui-shots
+          test "$rc" -eq 0
+          grep -q '\*\* TEST SUCCEEDED \*\*' proof/ui-test.log
+          i=15
+          for name in ui-denied ui-batch-tray ui-batch-freed ui-batch-home-after; do
+            cp "proof/ui-shots/$name.png" "proof/screens/$i-$name.png"
+            i=$((i + 1))
+          done
+
       - name: Verify screenshot sizes
         shell: bash
         run: |
@@ -118,7 +173,7 @@ jobs:
             if [ "$w" != "1320" ] || [ "$h" != "2868" ]; then fail=1; fi
           done
           echo "count: $count" | tee -a proof/sizes.txt
-          test "$count" -eq 14
+          test "$count" -eq 18
           test "$fail" -eq 0
 
       - name: Diagnostics (on failure)

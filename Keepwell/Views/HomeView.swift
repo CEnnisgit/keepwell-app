@@ -85,6 +85,7 @@ struct HomeView: View {
                     .font(.caption)
                     .foregroundStyle(Color.kwTextSecondary)
                     .padding(.top, 4)
+                    .accessibilityIdentifier("kw.freeDeletesLeft")
             }
         }
         .kwCard()
@@ -120,6 +121,7 @@ struct HomeView: View {
             }
             .kwCard()
         }
+        .accessibilityElement(children: .combine)
     }
 
     private var sessionCards: some View {
@@ -158,10 +160,11 @@ struct HomeView: View {
                     .multilineTextAlignment(.leading)
             }
             Spacer()
-            if let coverID { Thumbnail(id: coverID, side: 44).frame(width: 44) }
-            Image(systemName: "chevron.right").foregroundStyle(Color.kwTextSecondary)
+            if let coverID { Thumbnail(id: coverID, side: 44).frame(width: 44).accessibilityHidden(true) }
+            Image(systemName: "chevron.right").foregroundStyle(Color.kwTextSecondary).accessibilityHidden(true)
         }
         .kwCard()
+        .accessibilityElement(children: .combine)
     }
 
     private var monthsSection: some View {
@@ -304,6 +307,7 @@ private struct MonthRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("kw.monthRow")
             .accessibilityLabel(done ? "\(month.title), Done, \(progress) reviewed"
                                 : reviewed > 0 ? "\(month.title), \(progress) reviewed" : "\(month.title), \(items)")
             .accessibilityAddTraits(.isButton)

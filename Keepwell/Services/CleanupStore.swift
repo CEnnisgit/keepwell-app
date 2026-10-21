@@ -184,10 +184,7 @@ final class CleanupStore {
         }
 
         do {
-            try await PHPhotoLibrary.shared().performChanges {
-                let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-                PHAssetChangeRequest.deleteAssets(assets)
-            }
+            try await PHPhotoLibrary.shared().performChanges(Self.deleteChangeBlock(ids))
         } catch {
             if let photosError = error as? PHPhotosError, photosError.code == .userCancelled { return }
             errorMessage = "Couldn't delete: \(error.localizedDescription)"
@@ -220,6 +217,16 @@ final class CleanupStore {
         summary = FreedSummary(count: deleted.count, bytes: bytes, thumbnails: thumbs, date: .now)
     }
 
+    /// PhotoKit runs the change block on its own queue. Built outside the main actor so Swift 6 doesn't
+    /// infer @MainActor isolation for it, which traps at runtime ("Block was expected to execute on queue
+    /// com.apple.main-thread") the moment the user confirms a delete.
+    nonisolated static func deleteChangeBlock(_ ids: [String]) -> @Sendable () -> Void {
+        return {
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+            PHAssetChangeRequest.deleteAssets(assets)
+        }
+    }
+
     #if DEBUG
     /// Screenshot helper: shows the real summary screen for the given assets without deleting anything.
     func debugShowSummary(for ids: [String]) async {
@@ -228,7 +235,15 @@ final class CleanupStore {
         for id in ids {
             if let image = await ImageLoader.image(for: id, size: CGSize(width: 240, height: 240)) { thumbs.append(image) }
         }
-        summary = FreedSummary(count: ids.count, bytes: sizes.values.reduce(0, +), thumbnails: thumbs, date: .now)
+        let bytes = sizes.values.reduce(0, +)
+        // Stage a consistent running total: a plausible earlier total plus this batch, so the summary's
+        // "Total freed" row and the home SPACE FREED card agree with the batch shown. DEBUG only.
+        let priorBytes = 1_240_000_000, priorCount = 186
+        totalFreedBytes = priorBytes + Int(bytes)
+        totalDeletedCount = priorCount + ids.count
+        defaults.set(totalFreedBytes, forKey: Keys.totalFreedBytes)
+        defaults.set(totalDeletedCount, forKey: Keys.totalDeletedCount)
+        summary = FreedSummary(count: ids.count, bytes: bytes, thumbnails: thumbs, date: .now)
     }
     #endif
 
