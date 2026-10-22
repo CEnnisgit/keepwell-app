@@ -405,7 +405,7 @@ final class KeepwellTests: XCTestCase {
         XCTAssertFalse(StoreManager.ProductID.all.contains { $0.contains("weekly") })
         XCTAssertEqual(PaywallView.Plan.allCases.first, .yearly, "yearly is the default plan")
         XCTAssertEqual(PaywallView.Plan.allCases.count, 3)
-        XCTAssertEqual(PaywallView.Plan.lifetime.subtitle, "Pay once, keep Pro")
+        XCTAssertEqual(PaywallView.Plan.lifetime.subtitle, "Pay once, share with family")
         XCTAssertEqual(PaywallView.Plan.yearly.debugFallbackPrice, "$14.99")
         XCTAssertEqual(PaywallView.Plan.monthly.debugFallbackPrice, "$3.99")
         XCTAssertEqual(PaywallView.Plan.lifetime.debugFallbackPrice, "$24.99")
