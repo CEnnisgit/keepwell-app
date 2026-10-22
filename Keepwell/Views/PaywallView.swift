@@ -23,7 +23,7 @@ struct PaywallView: View {
         var subtitle: String {
             switch self {
             case .yearly: "Billed once a year"
-            case .lifetime: "Pay once, keep Pro"
+            case .lifetime: "Pay once, share with family"
             case .monthly: "Billed every month"
             }
         }
@@ -181,7 +181,7 @@ struct PaywallView: View {
     private var disclosure: some View {
         let yearly = price(.yearly).map { " Yearly is \($0) per year." } ?? ""
         let monthly = price(.monthly).map { " Monthly is \($0) per month." } ?? ""
-        return Text("Payment is charged to your Apple Account at confirmation.\(yearly)\(monthly) Subscriptions renew automatically unless canceled at least 24 hours before the end of the current period, and your account is charged for renewal within 24 hours before the period ends. Manage or cancel anytime in Settings › [your name] › Subscriptions. Lifetime is a one-time purchase. Deleted photos stay in Recently Deleted for 30 days.")
+        return Text("Payment is charged to your Apple Account at confirmation.\(yearly)\(monthly) Subscriptions renew automatically unless canceled at least 24 hours before the end of the current period, and your account is charged for renewal within 24 hours before the period ends. Manage or cancel anytime in Settings › [your name] › Subscriptions. Lifetime is a one-time purchase and can be shared with up to five family members through Family Sharing. Subscriptions can't be shared. Deleted photos stay in Recently Deleted for 30 days.")
             .font(.caption2)
             .foregroundStyle(Color.kwTextSecondary)
             .multilineTextAlignment(.center)
